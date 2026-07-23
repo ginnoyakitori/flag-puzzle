@@ -8,18 +8,24 @@
 </head>
 <body>
 
-  <h1>国旗パズル：日本</h1>
+  <h1 id="stage-title">国旗パズル</h1>
+  
+  <!-- ステージ選択ボタン -->
+  <div id="stage-selector">
+    <button onclick="loadStage('japan')">日本 (2:3)</button>
+    <button onclick="loadStage('switzerland')">スイス (1:1)</button>
+    <button onclick="loadStage('nepal')">ネパール (特殊)</button>
+  </div>
+
   <p>パーツを黒枠の中に正しく配置しよう！</p>
 
-  <!-- 目的地（黒枠） -->
+  <!-- 目的地（国旗ごとのサイズに合わせて可変） -->
   <div id="target-area"></div>
 
   <!-- パーツ置き場 -->
-  <div id="piece-container">
-    <div id="bg-piece" class="piece" style="top: 10px; left: 10px;"></div>
-    <div id="circle-piece" class="piece" style="top: 10px; left: 170px;"></div>
-  </div>
+  <div id="piece-container"></div>
 
-  <script src="game.js"></script>
+  <!-- game.js から client.js に変更 -->
+  <script src="client.js"></script>
 </body>
 </html>
