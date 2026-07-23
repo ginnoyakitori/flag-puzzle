@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>国旗パズル</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <h1>国旗パズル</h1>
+  <p>パーツをドラッグして黒枠の中に正しく配置しよう！</p>
+
+  <!-- 目的地（黒枠） -->
+  <div id="target-area"></div>
+
+  <!-- パーツ置き場 -->
+  <div id="piece-container">
+    <div id="bg-piece" class="piece" style="top: 10px; left: 10px;"></div>
+    <div id="circle-piece" class="piece" style="top: 10px; left: 170px;"></div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
