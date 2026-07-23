@@ -1,6 +1,5 @@
-// 各国旗のデータ定義（SVG読み込み対応）
+// ステージデータの定義
 const STAGES = {
-  // 1. 基本型（2:3）例：日本
   japan: {
     name: "日本",
     width: 300,
@@ -13,9 +12,6 @@ const STAGES = {
         height: 200,
         targetX: 0,
         targetY: 0,
-        initX: 10,
-        initY: 10,
-        // 土台（白い長方形パーツ）
         clipStyle: "inset(0 0 0 0)"
       },
       {
@@ -24,17 +20,12 @@ const STAGES = {
         height: 120,
         targetX: 90,
         targetY: 40,
-        initX: 180,
-        initY: 30,
-        // 日の丸部分を円形に切り抜き
         clipStyle: "circle(50% at 50% 50%)",
-        // 背景画像の表示位置オフセット
         bgPosition: "-90px -40px"
       }
     ]
   },
 
-  // 2. 正方形（1:1）例：スイス
   switzerland: {
     name: "スイス",
     width: 200,
@@ -47,9 +38,6 @@ const STAGES = {
         height: 200,
         targetX: 0,
         targetY: 0,
-        initX: 10,
-        initY: 10,
-        // 赤地土台
         clipStyle: "inset(0 0 0 0)"
       },
       {
@@ -58,16 +46,12 @@ const STAGES = {
         height: 120,
         targetX: 40,
         targetY: 40,
-        initX: 180,
-        initY: 30,
-        // 十字部分の切り抜き（ポリゴン）
         clipStyle: "polygon(33.3% 0%, 66.6% 0%, 66.6% 33.3%, 100% 33.3%, 100% 66.6%, 66.6% 66.6%, 66.6% 100%, 33.3% 100%, 33.3% 66.6%, 0% 66.6%, 0% 33.3%, 33.3% 33.3%)",
         bgPosition: "-40px -40px"
       }
     ]
   },
 
-  // 3. 特殊形状 例：ネパール
   nepal: {
     name: "ネパール",
     width: 200,
@@ -81,8 +65,6 @@ const STAGES = {
         height: 240,
         targetX: 0,
         targetY: 0,
-        initX: 10,
-        initY: 10,
         className: "nepal-shape",
         clipStyle: "inset(0 0 0 0)"
       }
@@ -93,7 +75,6 @@ const STAGES = {
 let currentStageData = null;
 let targets = {};
 
-// ステージ読み込み関数
 function loadStage(stageKey) {
   const stage = STAGES[stageKey];
   if (!stage) return;
@@ -103,15 +84,23 @@ function loadStage(stageKey) {
 
   document.getElementById("stage-title").textContent = `国旗パズル：${stage.name}`;
 
+  const gameCanvas = document.getElementById("game-canvas");
   const targetArea = document.getElementById("target-area");
-  const pieceContainer = document.getElementById("piece-container");
+  const pieceTray = document.getElementById("piece-tray");
 
+  // キャンバス・トレイ・ターゲットエリアのクリア
   targetArea.innerHTML = "";
-  pieceContainer.innerHTML = "";
+  pieceTray.innerHTML = "";
+  
+  // 既存のキャンバス上のピースを削除
+  const existingPieces = gameCanvas.querySelectorAll(".piece");
+  existingPieces.forEach(el => el.remove());
 
-  // ターゲットエリアのサイズ調整
+  // 黒枠（target-area）のサイズと中央配置設定
   targetArea.style.width = `${stage.width}px`;
   targetArea.style.height = `${stage.height}px`;
+  targetArea.style.left = `${(gameCanvas.clientWidth - stage.width) / 2}px`;
+  targetArea.style.top = `${(gameCanvas.clientHeight - stage.height) / 2}px`;
 
   if (stage.specialShape) {
     targetArea.classList.add(stage.specialShape);
@@ -119,35 +108,44 @@ function loadStage(stageKey) {
     targetArea.className = "";
   }
 
-  // ピースの生成
+  // トレイに各ピースを配置
   stage.pieces.forEach(p => {
     targets[p.id] = { x: p.targetX, y: p.targetY, placed: false };
 
+    // スクロール用トレイのラッパー要素
+    const trayItem = document.createElement("div");
+    trayItem.className = "tray-item";
+    trayItem.style.width = `${Math.min(p.width, 140)}px`;
+    trayItem.style.height = `${Math.min(p.height, 100)}px`;
+
+    // ピース本体要素
     const el = document.createElement("div");
     el.id = p.id;
     el.className = `piece ${p.className || ""}`;
     el.style.width = `${p.width}px`;
     el.style.height = `${p.height}px`;
 
-    // SVG画像の背景読み込み設定
+    // 背景SVGの設定
     el.style.backgroundImage = `url('${stage.svgPath}')`;
     el.style.backgroundSize = `${stage.width}px ${stage.height}px`;
     el.style.backgroundRepeat = "no-repeat";
 
-    // 切り抜き・位置調整の適用
     if (p.clipStyle) el.style.clipPath = p.clipStyle;
     if (p.bgPosition) el.style.backgroundPosition = p.bgPosition;
 
-    el.style.left = `${p.initX}px`;
-    el.style.top = `${p.initY}px`;
+    // トレイ内で縮小プレビュー表示（収まるようにスケール調整）
+    const scale = Math.min(130 / p.width, 90 / p.height, 1);
+    el.style.transform = `scale(${scale})`;
+    el.dataset.inTray = "true";
 
-    pieceContainer.appendChild(el);
-    setupDragEvents(el);
+    trayItem.appendChild(el);
+    pieceTray.appendChild(trayItem);
+
+    setupDragEvents(el, gameCanvas);
   });
 }
 
-// ドラッグ＆ドロップ（Pointer Events）のセットアップ
-function setupDragEvents(piece) {
+function setupDragEvents(piece, canvas) {
   let isDragging = false;
   let startX, startY, initialLeft, initialTop;
 
@@ -155,8 +153,26 @@ function setupDragEvents(piece) {
     isDragging = true;
     startX = e.clientX;
     startY = e.clientY;
-    initialLeft = piece.offsetLeft;
-    initialTop = piece.offsetTop;
+
+    // トレイからキャンバスへ移動する処理
+    if (piece.dataset.inTray === "true") {
+      const rect = piece.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+
+      // トレイからキャンバス要素配下へ付け替え
+      canvas.appendChild(piece);
+      piece.dataset.inTray = "false";
+      piece.style.transform = "none"; // 元のサイズに戻す
+
+      // キャンバス基準の座標を計算
+      initialLeft = rect.left - canvasRect.left;
+      initialTop = rect.top - canvasRect.top;
+      piece.style.left = `${initialLeft}px`;
+      piece.style.top = `${initialTop}px`;
+    } else {
+      initialLeft = piece.offsetLeft;
+      initialTop = piece.offsetTop;
+    }
 
     piece.setPointerCapture(e.pointerId);
     piece.style.cursor = "grabbing";
@@ -167,6 +183,8 @@ function setupDragEvents(piece) {
     if (!isDragging) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
+
+    // キャンバス内での自由な移動（はみ出し移動可能）
     piece.style.left = `${initialLeft + dx}px`;
     piece.style.top = `${initialTop + dy}px`;
   });
@@ -178,26 +196,32 @@ function setupDragEvents(piece) {
     piece.style.cursor = "grab";
     piece.style.zIndex = 1;
 
+    // 判定処理（黒枠内かどうか）
     checkPlacement(piece);
   });
 }
 
-// 位置判定・吸い付け関数
+// 判定およびスナップ関数
 function checkPlacement(piece) {
   const targetArea = document.getElementById("target-area");
+  
+  // 黒枠（targetArea）および ピース（piece）の絶対画面座標を取得
   const targetRect = targetArea.getBoundingClientRect();
   const pieceRect = piece.getBoundingClientRect();
 
+  // 黒枠（target-area）から見た相対座標
   const currentX = pieceRect.left - targetRect.left;
   const currentY = pieceRect.top - targetRect.top;
 
   const targetPos = targets[piece.id];
-  const threshold = 20;
+  const threshold = 25; // 吸い付け判定の許容誤差(px)
 
+  // 黒枠の中の正解座標に近いか判定
   if (
     Math.abs(currentX - targetPos.x) < threshold &&
     Math.abs(currentY - targetPos.y) < threshold
   ) {
+    // 吸い付け（黒枠要素の中に吸着移動）
     targetArea.appendChild(piece);
     piece.style.left = `${targetPos.x}px`;
     piece.style.top = `${targetPos.y}px`;
@@ -217,5 +241,5 @@ function checkWin() {
   }
 }
 
-// 初期表示
+// 初期化
 loadStage("japan");

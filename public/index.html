@@ -17,15 +17,19 @@
     <button onclick="loadStage('nepal')">ネパール (特殊)</button>
   </div>
 
-  <p>パーツを黒枠の中に正しく配置しよう！</p>
+  <p>下のリストからパーツを選んで、黒枠の中に正しく配置しよう！</p>
 
-  <!-- 目的地（国旗ごとのサイズに合わせて可変） -->
-  <div id="target-area"></div>
+  <!-- プレイフィールド（黒枠の周り・外側にもパーツを置けるキャンバスエリア） -->
+  <div id="game-canvas">
+    <!-- 目的地（黒枠エリア） -->
+    <div id="target-area"></div>
+  </div>
 
-  <!-- パーツ置き場 -->
-  <div id="piece-container"></div>
+  <!-- 下部：スクロール可能なパーツ置き場 -->
+  <div id="piece-tray-wrapper">
+    <div id="piece-tray"></div>
+  </div>
 
-  <!-- game.js から client.js に変更 -->
   <script src="client.js"></script>
 </body>
 </html>
