@@ -1,245 +1,197 @@
-// ステージデータの定義
-const STAGES = {
-  japan: {
-    name: "日本",
-    width: 300,
-    height: 200,
-    svgPath: "flags/japan.svg",
-    pieces: [
-      {
-        id: "jp-bg",
-        width: 300,
-        height: 200,
-        targetX: 0,
-        targetY: 0,
-        clipStyle: "inset(0 0 0 0)"
-      },
-      {
-        id: "jp-circle",
-        width: 120,
-        height: 120,
-        targetX: 90,
-        targetY: 40,
-        clipStyle: "circle(50% at 50% 50%)",
-        bgPosition: "-90px -40px"
-      }
-    ]
-  },
+(function () {
+  var G = GameCore, S = 14, OX = 8, OY = 6, WW = 46, WH = 30; // 作業台は46×30マス、旗の枠は(8,6)から30×18
+  var XMAX = 8, YMAX = 6;
+  var INKCOL = { R: '#f00', G: '#0f0', B: '#00f', C: '#0ff', M: '#f0f', Y: '#ff0' };
+  var $ = function (id) { return document.getElementById(id); };
+  var cv = $('cv'), ctx = cv.getContext('2d');
+  cv.width = WW * S; cv.height = WH * S;
+  var off = document.createElement('canvas'); off.width = cv.width; off.height = cv.height;
+  var octx = off.getContext('2d');
 
-  switzerland: {
-    name: "スイス",
-    width: 200,
-    height: 200,
-    svgPath: "flags/switzerland.svg",
-    pieces: [
-      {
-        id: "ch-bg",
-        width: 200,
-        height: 200,
-        targetX: 0,
-        targetY: 0,
-        clipStyle: "inset(0 0 0 0)"
-      },
-      {
-        id: "ch-cross",
-        width: 120,
-        height: 120,
-        targetX: 40,
-        targetY: 40,
-        clipStyle: "polygon(33.3% 0%, 66.6% 0%, 66.6% 33.3%, 100% 33.3%, 100% 66.6%, 66.6% 66.6%, 66.6% 100%, 33.3% 100%, 33.3% 66.6%, 0% 66.6%, 0% 33.3%, 33.3% 33.3%)",
-        bgPosition: "-40px -40px"
-      }
-    ]
-  },
+  var mode = 'add', flag, plates = [], sel = null, moves = 0, t0 = 0, solved = false, drag = null, hintTimer = null;
 
-  nepal: {
-    name: "ネパール",
-    width: 200,
-    height: 240,
-    svgPath: "flags/nepal.svg",
-    specialShape: "nepal-shape",
-    pieces: [
-      {
-        id: "np-full",
-        width: 200,
-        height: 240,
-        targetX: 0,
-        targetY: 0,
-        className: "nepal-shape",
-        clipStyle: "inset(0 0 0 0)"
-      }
-    ]
+  function ri(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  // ---- 出題 ----
+  function start(idx) {
+    flag = G.FLAGS[idx]; $('flagSel').value = idx;
+    plates = G.buildPlates(flag, mode).map(function (pl) {
+      var x, y; do { x = ri(-XMAX, XMAX); y = ri(-YMAX, YMAX); } while (Math.abs(x) + Math.abs(y) < 5);
+      return { id: pl.id, ops: pl.ops, x: x, y: y, on: true };
+    });
+    sel = null; moves = 0; solved = false; t0 = Date.now();
+    $('q').textContent = 'お題:「' + flag.name + '」の国旗をつくろう';
+    $('result').hidden = true; $('refbox').hidden = true; $('info').textContent = '';
+    renderChips(); draw(); loadRank();
   }
-};
-
-let currentStageData = null;
-let targets = {};
-
-function loadStage(stageKey) {
-  const stage = STAGES[stageKey];
-  if (!stage) return;
-
-  currentStageData = stage;
-  targets = {};
-
-  document.getElementById("stage-title").textContent = `国旗パズル：${stage.name}`;
-
-  const gameCanvas = document.getElementById("game-canvas");
-  const targetArea = document.getElementById("target-area");
-  const pieceTray = document.getElementById("piece-tray");
-
-  // キャンバス・トレイ・ターゲットエリアのクリア
-  targetArea.innerHTML = "";
-  pieceTray.innerHTML = "";
-  
-  // 既存のキャンバス上のピースを削除
-  const existingPieces = gameCanvas.querySelectorAll(".piece");
-  existingPieces.forEach(el => el.remove());
-
-  // 黒枠（target-area）のサイズと中央配置設定
-  targetArea.style.width = `${stage.width}px`;
-  targetArea.style.height = `${stage.height}px`;
-  targetArea.style.left = `${(gameCanvas.clientWidth - stage.width) / 2}px`;
-  targetArea.style.top = `${(gameCanvas.clientHeight - stage.height) / 2}px`;
-
-  if (stage.specialShape) {
-    targetArea.classList.add(stage.specialShape);
-  } else {
-    targetArea.className = "";
+  function randomFlag() {
+    var n; do { n = ri(0, G.FLAGS.length - 1); } while (G.FLAGS.length > 1 && G.FLAGS[n] === flag);
+    start(n);
   }
 
-  // トレイに各ピースを配置
-  stage.pieces.forEach(p => {
-    targets[p.id] = { x: p.targetX, y: p.targetY, placed: false };
-
-    // スクロール用トレイのラッパー要素
-    const trayItem = document.createElement("div");
-    trayItem.className = "tray-item";
-    trayItem.style.width = `${Math.min(p.width, 140)}px`;
-    trayItem.style.height = `${Math.min(p.height, 100)}px`;
-
-    // ピース本体要素
-    const el = document.createElement("div");
-    el.id = p.id;
-    el.className = `piece ${p.className || ""}`;
-    el.style.width = `${p.width}px`;
-    el.style.height = `${p.height}px`;
-
-    // 背景SVGの設定
-    el.style.backgroundImage = `url('${stage.svgPath}')`;
-    el.style.backgroundSize = `${stage.width}px ${stage.height}px`;
-    el.style.backgroundRepeat = "no-repeat";
-
-    if (p.clipStyle) el.style.clipPath = p.clipStyle;
-    if (p.bgPosition) el.style.backgroundPosition = p.bgPosition;
-
-    // トレイ内で縮小プレビュー表示（収まるようにスケール調整）
-    const scale = Math.min(130 / p.width, 90 / p.height, 1);
-    el.style.transform = `scale(${scale})`;
-    el.dataset.inTray = "true";
-
-    trayItem.appendChild(el);
-    pieceTray.appendChild(trayItem);
-
-    setupDragEvents(el, gameCanvas);
-  });
-}
-
-function setupDragEvents(piece, canvas) {
-  let isDragging = false;
-  let startX, startY, initialLeft, initialTop;
-
-  piece.addEventListener("pointerdown", (e) => {
-    isDragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
-
-    // トレイからキャンバスへ移動する処理
-    if (piece.dataset.inTray === "true") {
-      const rect = piece.getBoundingClientRect();
-      const canvasRect = canvas.getBoundingClientRect();
-
-      // トレイからキャンバス要素配下へ付け替え
-      canvas.appendChild(piece);
-      piece.dataset.inTray = "false";
-      piece.style.transform = "none"; // 元のサイズに戻す
-
-      // キャンバス基準の座標を計算
-      initialLeft = rect.left - canvasRect.left;
-      initialTop = rect.top - canvasRect.top;
-      piece.style.left = `${initialLeft}px`;
-      piece.style.top = `${initialTop}px`;
-    } else {
-      initialLeft = piece.offsetLeft;
-      initialTop = piece.offsetTop;
+  // ---- 描画 ----
+  function shape(c, p, dx, dy) {
+    c.beginPath();
+    if (p.t === 'r') c.rect((p.x + dx) * S, (p.y + dy) * S, p.w * S, p.h * S);
+    else c.arc((p.cx + dx) * S, (p.cy + dy) * S, p.r * S, 0, Math.PI * 2);
+    c.fill();
+  }
+  function drawPlate(c, pl) {
+    c.fillStyle = INKCOL[pl.id];
+    pl.ops.forEach(function (o) {
+      c.globalCompositeOperation = o.op === 'add' ? 'source-over' : 'destination-out';
+      shape(c, o.p, pl.x + OX, pl.y + OY);
+    });
+    c.globalCompositeOperation = 'source-over';
+  }
+  function draw() {
+    var add = mode === 'add';
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = add ? '#000' : '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    plates.forEach(function (pl) {
+      if (!pl.on) return;
+      octx.clearRect(0, 0, off.width, off.height); drawPlate(octx, pl);
+      ctx.globalCompositeOperation = add ? 'lighter' : 'multiply';
+      ctx.drawImage(off, 0, 0);
+    });
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(128,128,128,.4)'; ctx.beginPath();
+    ctx.rect(0, 0, cv.width, cv.height); ctx.rect(OX * S, OY * S, G.W * S, G.H * S); ctx.fill('evenodd');
+    ctx.lineWidth = 2; ctx.setLineDash([]); ctx.strokeStyle = add ? '#ddd' : '#444';
+    ctx.strokeRect(OX * S, OY * S, G.W * S, G.H * S);
+    if (sel && sel.on) {
+      ctx.setLineDash([6, 4]); ctx.strokeStyle = '#4a90e2'; ctx.lineWidth = 2;
+      ctx.strokeRect((sel.x + OX) * S, (sel.y + OY) * S, G.W * S, G.H * S); ctx.setLineDash([]);
     }
-
-    piece.setPointerCapture(e.pointerId);
-    piece.style.cursor = "grabbing";
-    piece.style.zIndex = 1000;
-  });
-
-  window.addEventListener("pointermove", (e) => {
-    if (!isDragging) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-
-    // キャンバス内での自由な移動（はみ出し移動可能）
-    piece.style.left = `${initialLeft + dx}px`;
-    piece.style.top = `${initialTop + dy}px`;
-  });
-
-  window.addEventListener("pointerup", (e) => {
-    if (!isDragging) return;
-    isDragging = false;
-    piece.releasePointerCapture(e.pointerId);
-    piece.style.cursor = "grab";
-    piece.style.zIndex = 1;
-
-    // 判定処理（黒枠内かどうか）
-    checkPlacement(piece);
-  });
-}
-
-// 判定およびスナップ関数
-function checkPlacement(piece) {
-  const targetArea = document.getElementById("target-area");
-  
-  // 黒枠（targetArea）および ピース（piece）の絶対画面座標を取得
-  const targetRect = targetArea.getBoundingClientRect();
-  const pieceRect = piece.getBoundingClientRect();
-
-  // 黒枠（target-area）から見た相対座標
-  const currentX = pieceRect.left - targetRect.left;
-  const currentY = pieceRect.top - targetRect.top;
-
-  const targetPos = targets[piece.id];
-  const threshold = 25; // 吸い付け判定の許容誤差(px)
-
-  // 黒枠の中の正解座標に近いか判定
-  if (
-    Math.abs(currentX - targetPos.x) < threshold &&
-    Math.abs(currentY - targetPos.y) < threshold
-  ) {
-    // 吸い付け（黒枠要素の中に吸着移動）
-    targetArea.appendChild(piece);
-    piece.style.left = `${targetPos.x}px`;
-    piece.style.top = `${targetPos.y}px`;
-    targetPos.placed = true;
-  } else {
-    targetPos.placed = false;
+  }
+  function drawRef() {
+    var c = $('ref').getContext('2d'), k = $('ref').width / G.W, x, y;
+    for (x = 0; x < G.W; x++) for (y = 0; y < G.H; y++) {
+      c.fillStyle = 'rgb(' + G.colorAt(flag, x + 0.5, y + 0.5).join(',') + ')';
+      c.fillRect(x * k, y * k, k + 1, k + 1);
+    }
   }
 
-  checkWin();
-}
-
-// クリア判定
-function checkWin() {
-  const allPlaced = Object.values(targets).every(t => t.placed);
-  if (allPlaced && Object.keys(targets).length > 0) {
-    setTimeout(() => alert(`🎉 ${currentStageData.name} の国旗が完成しました！ 🎉`), 100);
+  // ---- 操作 ----
+  function worldPos(e) {
+    var r = cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * WW - OX, y: (e.clientY - r.top) / r.height * WH - OY };
   }
-}
+  function inBox(pl, p) { return p.x >= pl.x && p.x <= pl.x + G.W && p.y >= pl.y && p.y <= pl.y + G.H; }
+  function select(pl) {
+    sel = pl; plates.splice(plates.indexOf(pl), 1); plates.push(pl); renderChips();
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    if (solved) return; cv.focus();
+    var p = worldPos(e), hit = null, i;
+    if (sel && sel.on && inBox(sel, p)) hit = sel;
+    else for (i = plates.length - 1; i >= 0; i--) if (plates[i].on && inBox(plates[i], p)) { hit = plates[i]; break; }
+    if (!hit) return;
+    select(hit);
+    drag = { pl: hit, px: p.x, py: p.y, x0: hit.x, y0: hit.y };
+    cv.setPointerCapture(e.pointerId); draw();
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!drag) return; var p = worldPos(e);
+    drag.pl.x = clamp(Math.round(drag.x0 + p.x - drag.px), -XMAX, XMAX);
+    drag.pl.y = clamp(Math.round(drag.y0 + p.y - drag.py), -YMAX, YMAX);
+    draw();
+  });
+  function endDrag() {
+    if (!drag) return;
+    if (drag.pl.x !== drag.x0 || drag.pl.y !== drag.y0) { moves++; afterMove(); }
+    drag = null;
+  }
+  cv.addEventListener('pointerup', endDrag);
+  cv.addEventListener('pointercancel', endDrag);
+  cv.addEventListener('keydown', function (e) {
+    var d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!d || !sel || !sel.on || solved) return; e.preventDefault();
+    var nx = clamp(sel.x + d[0], -XMAX, XMAX), ny = clamp(sel.y + d[1], -YMAX, YMAX);
+    if (nx === sel.x && ny === sel.y) return;
+    sel.x = nx; sel.y = ny; moves++; afterMove();
+  });
 
-// 初期化
-loadStage("japan");
+  function placements() {
+    var o = {}; plates.forEach(function (pl) { o[pl.id] = { x: pl.x, y: pl.y, on: pl.on }; }); return o;
+  }
+  function afterMove() {
+    draw(); $('info').textContent = '操作回数:' + moves;
+    if (G.evaluate(flag, mode, placements()) >= G.PASS) win();
+  }
+  function stars() {
+    var par = plates.length;
+    return moves <= par * 2 ? '★★★' : moves <= par * 3 ? '★★☆' : '★☆☆';
+  }
+  function win() {
+    solved = true; sel = null; draw(); renderChips();
+    var sec = Math.round((Date.now() - t0) / 1000);
+    $('msg').textContent = '🎉 正解!「' + flag.name + '」 操作' + moves + '回・' + sec + '秒 ' + stars();
+    $('name').value = localStorage.getItem('fm-name') || '';
+    $('send').disabled = false; $('result').hidden = false;
+  }
+
+  function renderChips() {
+    var box = $('chips'); box.innerHTML = '';
+    plates.slice().sort(function (a, b) { return a.id < b.id ? -1 : 1; }).forEach(function (pl) {
+      var b = document.createElement('button'); b.className = 'chip' + (pl === sel ? ' sel' : '');
+      var sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = INKCOL[pl.id];
+      var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = pl.on; cb.title = '板を使う';
+      cb.onclick = function (e) {
+        e.stopPropagation(); if (solved) { e.preventDefault(); return; }
+        pl.on = cb.checked; moves++; if (!pl.on && sel === pl) sel = null; renderChips(); afterMove();
+      };
+      b.append(sw, document.createTextNode(pl.id + '板 '), cb);
+      b.onclick = function () { if (!solved) { select(pl); draw(); } };
+      box.appendChild(b);
+    });
+  }
+
+  // ---- ボタン類 ----
+  $('check').onclick = function () {
+    if (solved) return; moves++;
+    var r = G.evaluate(flag, mode, placements());
+    $('info').textContent = '一致度:' + Math.round(r * 100) + '%  / 操作回数:' + moves;
+  };
+  $('hint').onclick = function () {
+    if (solved) return; moves += 3; drawRef(); $('refbox').hidden = false;
+    $('info').textContent = '操作回数:' + moves;
+    clearTimeout(hintTimer); hintTimer = setTimeout(function () { $('refbox').hidden = true; }, 3000);
+  };
+  $('reset').onclick = function () { start(G.FLAGS.indexOf(flag)); };
+  $('rand').onclick = randomFlag; $('next').onclick = randomFlag;
+  $('flagSel').onchange = function () { start(+this.value); };
+  function setMode(m) {
+    mode = m; $('m-add').className = m === 'add' ? 'on' : ''; $('m-sub').className = m === 'sub' ? 'on' : '';
+    start(G.FLAGS.indexOf(flag));
+  }
+  $('m-add').onclick = function () { setMode('add'); };
+  $('m-sub').onclick = function () { setMode('sub'); };
+
+  // ---- サーバー連携 ----
+  $('send').onclick = function () {
+    var name = $('name').value.trim() || '名無し'; localStorage.setItem('fm-name', name);
+    $('send').disabled = true;
+    fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag: flag.id, mode: mode, name: name, moves: moves, ms: Date.now() - t0, placements: placements() }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { $('msg').textContent += j.ok ? '(記録しました)' : '(記録に失敗:' + j.error + ')'; loadRank(); })
+      .catch(function () { $('msg').textContent += '(通信エラー)'; $('send').disabled = false; });
+  };
+  function loadRank() {
+    fetch('/api/ranking?flag=' + flag.id + '&mode=' + mode).then(function (r) { return r.json(); }).then(function (list) {
+      var ol = $('rank'); ol.innerHTML = '';
+      if (!list.length) { ol.innerHTML = '<li>まだ記録がありません</li>'; return; }
+      list.forEach(function (e) {
+        var li = document.createElement('li');
+        li.textContent = e.name + ' — ' + e.moves + '回 / ' + Math.round(e.ms / 1000) + '秒'; ol.appendChild(li);
+      });
+    }).catch(function () { $('rank').innerHTML = '<li>ランキングを取得できません</li>'; });
+  }
+
+  G.FLAGS.forEach(function (f, i) {
+    var o = document.createElement('option'); o.value = i; o.textContent = f.name; $('flagSel').appendChild(o);
+  });
+  start(ri(0, G.FLAGS.length - 1));
+})();

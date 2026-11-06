@@ -1,11 +1,8 @@
 {
-  "name": "flag-puzzle",
+  "name": "flag-light-plates",
   "version": "1.0.0",
+  "description": "光の板(加法・減法混色)を動かして国旗をつくるパズル",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.19.2"
-  }
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "express": "^4.19.2" }
 }

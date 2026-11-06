@@ -1,35 +1,47 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>国旗パズル</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>光の板で国旗をつくろう</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-  <h1 id="stage-title">国旗パズル</h1>
-  
-  <!-- ステージ選択ボタン -->
-  <div id="stage-selector">
-    <button onclick="loadStage('japan')">日本 (2:3)</button>
-    <button onclick="loadStage('switzerland')">スイス (1:1)</button>
-    <button onclick="loadStage('nepal')">ネパール (特殊)</button>
+<main>
+  <h1>光の板で国旗をつくろう</h1>
+  <div class="row">
+    <button id="m-add" class="on">加法混色(光 R G B)</button>
+    <button id="m-sub">減法混色(フィルター C M Y)</button>
   </div>
-
-  <p>下のリストからパーツを選んで、黒枠の中に正しく配置しよう！</p>
-
-  <!-- プレイフィールド（黒枠の周り・外側にもパーツを置けるキャンバスエリア） -->
-  <div id="game-canvas">
-    <!-- 目的地（黒枠エリア） -->
-    <div id="target-area"></div>
+  <div class="row">
+    <select id="flagSel"></select>
+    <button id="rand">おまかせ出題</button>
   </div>
-
-  <!-- 下部：スクロール可能なパーツ置き場 -->
-  <div id="piece-tray-wrapper">
-    <div id="piece-tray"></div>
+  <div id="q" class="q"></div>
+  <canvas id="cv" tabindex="0"></canvas>
+  <p class="note">板をドラッグ(または矢印キー)で動かし、点線の枠(30×18)に重ねて国旗を完成させよう。</p>
+  <div id="chips" class="row"></div>
+  <div class="row">
+    <button id="check">答え合わせ(+1回)</button>
+    <button id="hint">お手本を3秒表示(+3回)</button>
+    <button id="reset">やり直す</button>
   </div>
-
-  <script src="client.js"></script>
+  <div id="info" class="info"></div>
+  <div id="refbox" class="refbox" hidden><canvas id="ref" width="300" height="180"></canvas></div>
+  <section id="result" hidden>
+    <div id="msg" class="msg"></div>
+    <div class="row">
+      <input id="name" maxlength="12" placeholder="名前(ランキング用)">
+      <button id="send">記録を送る</button>
+      <button id="next">次の国旗へ</button>
+    </div>
+  </section>
+  <section>
+    <h2>ランキング(操作回数が少ない順)</h2>
+    <ol id="rank"></ol>
+  </section>
+</main>
+<script src="game-core.js"></script>
+<script src="client.js"></script>
 </body>
 </html>
