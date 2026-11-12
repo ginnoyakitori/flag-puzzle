@@ -1,6 +1,5 @@
 (function () {
-  var G = GameCore, S = 14, OX = 8, OY = 6, WW = 46, WH = 30; // 作業台は46×30マス、旗の枠は(8,6)から30×18
-  var XMAX = 8, YMAX = 6;
+  var G = GameCore, S = 14, OX = G.WS.ox, OY = G.WS.oy, WW = G.WS.w, WH = G.WS.h; // 作業台46×30、旗の枠は(8,6)から30×18
   var INKCOL = { R: '#f00', G: '#0f0', B: '#00f', C: '#0ff', M: '#f0f', Y: '#ff0' };
   var $ = function (id) { return document.getElementById(id); };
   var cv = $('cv'), ctx = cv.getContext('2d');
@@ -8,42 +7,48 @@
   var off = document.createElement('canvas'); off.width = cv.width; off.height = cv.height;
   var octx = off.getContext('2d');
 
-  var mode = 'add', flag, plates = [], sel = null, moves = 0, t0 = 0, solved = false, drag = null, hintTimer = null;
+  var mode = 'add', flag, plates = [], sel = null, moves = 0, par = 1, t0 = 0, solved = false, drag = null, hintTimer = null;
 
   function ri(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
   // ---- 出題 ----
-  function start(idx) {
-    flag = G.FLAGS[idx]; $('flagSel').value = idx;
-    plates = G.buildPlates(flag, mode).map(function (pl) {
-      var x, y; do { x = ri(-XMAX, XMAX); y = ri(-YMAX, YMAX); } while (Math.abs(x) + Math.abs(y) < 5);
-      return { id: pl.id, ops: pl.ops, x: x, y: y, on: true };
+  function fillSelect() {
+    var sl = $('flagSel'); sl.innerHTML = '';
+    G.available(mode).forEach(function (f) {
+      var o = document.createElement('option'); o.value = f.id; o.textContent = f.name; sl.appendChild(o);
+    });
+  }
+  function start(id) {
+    flag = G.FLAGS.filter(function (f) { return f.id === id; })[0]; $('flagSel').value = id;
+    var rg = G.range(); par = 0;
+    plates = G.buildPlates(flag, mode).map(function (sp) {
+      var x, y, k = Math.random() < 0.6 ? ri(1, 3) : 0, s10 = Math.random() < 0.6 ? ri(6, 14) : 10;
+      if (s10 === 10 && k === 0) k = 1;
+      do { x = ri(rg.x0 + 2, rg.x1 - 2); y = ri(rg.y0 + 2, rg.y1 - 2); } while (Math.abs(x - sp.x) + Math.abs(y - sp.y) < 4);
+      par += 1 + Math.min(k, 4 - k) + Math.abs(s10 - 10);
+      return { id: sp.id, ink: sp.ink, ops: sp.ops, bb: sp.bb, hole: sp.hole, kind: sp.kind, x: x, y: y, rot: k * 90, s10: s10, on: true };
     });
     sel = null; moves = 0; solved = false; t0 = Date.now();
-    $('q').textContent = 'お題:「' + flag.name + '」の国旗をつくろう';
+    $('q').textContent = 'お題:「' + flag.name + '」の国旗をつくろう(板は' + plates.length + '枚)';
     $('result').hidden = true; $('refbox').hidden = true; $('info').textContent = '';
     renderChips(); draw(); loadRank();
   }
   function randomFlag() {
-    var n; do { n = ri(0, G.FLAGS.length - 1); } while (G.FLAGS.length > 1 && G.FLAGS[n] === flag);
-    start(n);
+    var list = G.available(mode), n;
+    do { n = list[ri(0, list.length - 1)]; } while (list.length > 1 && n === flag);
+    start(n.id);
   }
 
-  // ---- 描画 ----
-  function shape(c, p, dx, dy) {
+  // ---- 描画(単色の板を lighter=加法 / multiply=減法 で重ねる) ----
+  function path(c, p) {
     c.beginPath();
-    if (p.t === 'r') c.rect((p.x + dx) * S, (p.y + dy) * S, p.w * S, p.h * S);
-    else c.arc((p.cx + dx) * S, (p.cy + dy) * S, p.r * S, 0, Math.PI * 2);
-    c.fill();
+    if (p.t === 'r') c.rect(p.x, p.y, p.w, p.h);
+    else if (p.t === 'c') c.arc(p.cx, p.cy, p.r, 0, Math.PI * 2);
+    else { p.pts.forEach(function (q, i) { i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]); }); c.closePath(); }
   }
-  function drawPlate(c, pl) {
-    c.fillStyle = INKCOL[pl.id];
-    pl.ops.forEach(function (o) {
-      c.globalCompositeOperation = o.op === 'add' ? 'source-over' : 'destination-out';
-      shape(c, o.p, pl.x + OX, pl.y + OY);
-    });
-    c.globalCompositeOperation = 'source-over';
+  function applyTf(c, pl) {
+    c.translate((pl.x + OX) * S, (pl.y + OY) * S); c.rotate(pl.rot * Math.PI / 180); c.scale(pl.s10 / 10 * S, pl.s10 / 10 * S);
   }
   function draw() {
     var add = mode === 'add';
@@ -51,7 +56,13 @@
     ctx.fillStyle = add ? '#000' : '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
     plates.forEach(function (pl) {
       if (!pl.on) return;
-      octx.clearRect(0, 0, off.width, off.height); drawPlate(octx, pl);
+      octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, off.width, off.height);
+      octx.save(); applyTf(octx, pl); octx.fillStyle = INKCOL[pl.ink];
+      pl.ops.forEach(function (o) {
+        octx.globalCompositeOperation = o.op === 'add' ? 'source-over' : 'destination-out';
+        path(octx, o.p); octx.fill();
+      });
+      octx.restore(); octx.globalCompositeOperation = 'source-over';
       ctx.globalCompositeOperation = add ? 'lighter' : 'multiply';
       ctx.drawImage(off, 0, 0);
     });
@@ -60,10 +71,15 @@
     ctx.rect(0, 0, cv.width, cv.height); ctx.rect(OX * S, OY * S, G.W * S, G.H * S); ctx.fill('evenodd');
     ctx.lineWidth = 2; ctx.setLineDash([]); ctx.strokeStyle = add ? '#ddd' : '#444';
     ctx.strokeRect(OX * S, OY * S, G.W * S, G.H * S);
-    if (sel && sel.on) {
-      ctx.setLineDash([6, 4]); ctx.strokeStyle = '#4a90e2'; ctx.lineWidth = 2;
-      ctx.strokeRect((sel.x + OX) * S, (sel.y + OY) * S, G.W * S, G.H * S); ctx.setLineDash([]);
+    if (sel && sel.on) { // 選択中の板:点線の枠と中心(●)
+      ctx.save(); applyTf(ctx, sel);
+      ctx.lineWidth = 2 / (sel.s10 / 10 * S); ctx.setLineDash([6 / S, 4 / S]); ctx.strokeStyle = '#4a90e2';
+      ctx.strokeRect(sel.bb.x0, sel.bb.y0, sel.bb.x1 - sel.bb.x0, sel.bb.y1 - sel.bb.y0);
+      ctx.restore();
+      ctx.fillStyle = '#4a90e2'; ctx.beginPath(); ctx.arc((sel.x + OX) * S, (sel.y + OY) * S, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.setLineDash([]); ctx.stroke();
     }
+    updateTools();
   }
   function drawRef() {
     var c = $('ref').getContext('2d'), k = $('ref').width / G.W, x, y;
@@ -78,24 +94,26 @@
     var r = cv.getBoundingClientRect();
     return { x: (e.clientX - r.left) / r.width * WW - OX, y: (e.clientY - r.top) / r.height * WH - OY };
   }
-  function inBox(pl, p) { return p.x >= pl.x && p.x <= pl.x + G.W && p.y >= pl.y && p.y <= pl.y + G.H; }
-  function select(pl) {
-    sel = pl; plates.splice(plates.indexOf(pl), 1); plates.push(pl); renderChips();
+  function local(pl, p) { // 世界座標→板の座標
+    var a = pl.rot * Math.PI / 180, s = pl.s10 / 10, dx = p.x - pl.x, dy = p.y - pl.y;
+    return { x: (dx * Math.cos(a) + dy * Math.sin(a)) / s, y: (-dx * Math.sin(a) + dy * Math.cos(a)) / s };
   }
+  function hits(pl, p) { var q = local(pl, p), b = pl.bb; return q.x >= b.x0 && q.x <= b.x1 && q.y >= b.y0 && q.y <= b.y1; }
+  function area(pl) { var b = pl.bb, s = pl.s10 / 10; return (b.x1 - b.x0) * (b.y1 - b.y0) * s * s; }
+  function select(pl) { sel = pl; renderChips(); }
   cv.addEventListener('pointerdown', function (e) {
     if (solved) return; cv.focus();
-    var p = worldPos(e), hit = null, i;
-    if (sel && sel.on && inBox(sel, p)) hit = sel;
-    else for (i = plates.length - 1; i >= 0; i--) if (plates[i].on && inBox(plates[i], p)) { hit = plates[i]; break; }
+    var p = worldPos(e), hit = null;
+    plates.forEach(function (pl) { if (pl.on && hits(pl, p) && (!hit || area(pl) < area(hit))) hit = pl; });
     if (!hit) return;
     select(hit);
     drag = { pl: hit, px: p.x, py: p.y, x0: hit.x, y0: hit.y };
     cv.setPointerCapture(e.pointerId); draw();
   });
   cv.addEventListener('pointermove', function (e) {
-    if (!drag) return; var p = worldPos(e);
-    drag.pl.x = clamp(Math.round(drag.x0 + p.x - drag.px), -XMAX, XMAX);
-    drag.pl.y = clamp(Math.round(drag.y0 + p.y - drag.py), -YMAX, YMAX);
+    if (!drag) return; var p = worldPos(e), rg = G.range();
+    drag.pl.x = clamp(Math.round(drag.x0 + p.x - drag.px), rg.x0, rg.x1);
+    drag.pl.y = clamp(Math.round(drag.y0 + p.y - drag.py), rg.y0, rg.y1);
     draw();
   });
   function endDrag() {
@@ -105,25 +123,40 @@
   }
   cv.addEventListener('pointerup', endDrag);
   cv.addEventListener('pointercancel', endDrag);
+
+  function move(dx, dy) {
+    if (!sel || !sel.on || solved) return; var rg = G.range();
+    var nx = clamp(sel.x + dx, rg.x0, rg.x1), ny = clamp(sel.y + dy, rg.y0, rg.y1);
+    if (nx === sel.x && ny === sel.y) return; sel.x = nx; sel.y = ny; moves++; afterMove();
+  }
+  function rotate(d) { if (!sel || !sel.on || solved) return; sel.rot = (sel.rot + d + 360) % 360; moves++; renderChips(); afterMove(); }
+  function scale(d) {
+    if (!sel || !sel.on || solved) return; var n = clamp(sel.s10 + d, 5, 20);
+    if (n === sel.s10) return; sel.s10 = n; moves++; renderChips(); afterMove();
+  }
   cv.addEventListener('keydown', function (e) {
-    var d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
-    if (!d || !sel || !sel.on || solved) return; e.preventDefault();
-    var nx = clamp(sel.x + d[0], -XMAX, XMAX), ny = clamp(sel.y + d[1], -YMAX, YMAX);
-    if (nx === sel.x && ny === sel.y) return;
-    sel.x = nx; sel.y = ny; moves++; afterMove();
+    var k = e.key, d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[k];
+    if (d) { e.preventDefault(); move(d[0], d[1]); }
+    else if (k === 'q' || k === 'Q') rotate(e.shiftKey ? -90 : -15);
+    else if (k === 'e' || k === 'E') rotate(e.shiftKey ? 90 : 15);
+    else if (k === '-') scale(-1); else if (k === '+' || k === '=') scale(1);
   });
+  $('rotL90').onclick = function () { rotate(-90); }; $('rotL15').onclick = function () { rotate(-15); };
+  $('rotR15').onclick = function () { rotate(15); }; $('rotR90').onclick = function () { rotate(90); };
+  $('scDown').onclick = function () { scale(-1); }; $('scUp').onclick = function () { scale(1); };
+  function updateTools() {
+    var dis = !(sel && sel.on) || solved;
+    ['rotL90', 'rotL15', 'rotR15', 'rotR90', 'scDown', 'scUp'].forEach(function (id) { $(id).disabled = dis; });
+  }
 
   function placements() {
-    var o = {}; plates.forEach(function (pl) { o[pl.id] = { x: pl.x, y: pl.y, on: pl.on }; }); return o;
+    var o = {}; plates.forEach(function (pl) { o[pl.id] = { x: pl.x, y: pl.y, rot: pl.rot, s10: pl.s10, on: pl.on }; }); return o;
   }
   function afterMove() {
     draw(); $('info').textContent = '操作回数:' + moves;
     if (G.evaluate(flag, mode, placements()) >= G.PASS) win();
   }
-  function stars() {
-    var par = plates.length;
-    return moves <= par * 2 ? '★★★' : moves <= par * 3 ? '★★☆' : '★☆☆';
-  }
+  function stars() { return moves <= par * 1.5 ? '★★★' : moves <= par * 2.5 ? '★★☆' : '★☆☆'; }
   function win() {
     solved = true; sel = null; draw(); renderChips();
     var sec = Math.round((Date.now() - t0) / 1000);
@@ -132,17 +165,22 @@
     $('send').disabled = false; $('result').hidden = false;
   }
 
+  function label(pl) {
+    var b = pl.bb, w = Math.round(b.x1 - b.x0), h = Math.round(b.y1 - b.y0);
+    var shape = pl.kind === 'c' ? '円φ' + w : pl.kind === 'r' ? w + '×' + h : pl.kind === 'p' ? '多角形' : w + '×' + h + '系';
+    return pl.ink + '板 ' + shape + (pl.hole ? ' 穴あり' : '') + ' ∠' + pl.rot + '° ×' + (pl.s10 / 10).toFixed(1);
+  }
   function renderChips() {
     var box = $('chips'); box.innerHTML = '';
-    plates.slice().sort(function (a, b) { return a.id < b.id ? -1 : 1; }).forEach(function (pl) {
+    plates.forEach(function (pl) {
       var b = document.createElement('button'); b.className = 'chip' + (pl === sel ? ' sel' : '');
-      var sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = INKCOL[pl.id];
+      var sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = INKCOL[pl.ink];
       var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = pl.on; cb.title = '板を使う';
       cb.onclick = function (e) {
         e.stopPropagation(); if (solved) { e.preventDefault(); return; }
         pl.on = cb.checked; moves++; if (!pl.on && sel === pl) sel = null; renderChips(); afterMove();
       };
-      b.append(sw, document.createTextNode(pl.id + '板 '), cb);
+      b.append(sw, document.createTextNode(label(pl) + ' '), cb);
       b.onclick = function () { if (!solved) { select(pl); draw(); } };
       box.appendChild(b);
     });
@@ -159,12 +197,12 @@
     $('info').textContent = '操作回数:' + moves;
     clearTimeout(hintTimer); hintTimer = setTimeout(function () { $('refbox').hidden = true; }, 3000);
   };
-  $('reset').onclick = function () { start(G.FLAGS.indexOf(flag)); };
+  $('reset').onclick = function () { start(flag.id); };
   $('rand').onclick = randomFlag; $('next').onclick = randomFlag;
-  $('flagSel').onchange = function () { start(+this.value); };
+  $('flagSel').onchange = function () { start(this.value); };
   function setMode(m) {
     mode = m; $('m-add').className = m === 'add' ? 'on' : ''; $('m-sub').className = m === 'sub' ? 'on' : '';
-    start(G.FLAGS.indexOf(flag));
+    start(flag.id);
   }
   $('m-add').onclick = function () { setMode('add'); };
   $('m-sub').onclick = function () { setMode('sub'); };
@@ -190,8 +228,6 @@
     }).catch(function () { $('rank').innerHTML = '<li>ランキングを取得できません</li>'; });
   }
 
-  G.FLAGS.forEach(function (f, i) {
-    var o = document.createElement('option'); o.value = i; o.textContent = f.name; $('flagSel').appendChild(o);
-  });
-  start(ri(0, G.FLAGS.length - 1));
+  fillSelect();
+  start(G.FLAGS[ri(0, G.FLAGS.length - 1)].id);
 })();

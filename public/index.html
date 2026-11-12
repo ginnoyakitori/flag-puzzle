@@ -19,8 +19,13 @@
   </div>
   <div id="q" class="q"></div>
   <canvas id="cv" tabindex="0"></canvas>
-  <p class="note">板をドラッグ(または矢印キー)で動かし、点線の枠(30×18)に重ねて国旗を完成させよう。</p>
+  <p class="note">板は単色で、形はいろいろです。穴(透明部分)があるのは、穴がないと旗にならない板だけ。板をドラッグで動かし、ボタンで回転・拡大縮小して、点線の枠(30×18)の中に国旗を完成させよう。回転と拡大縮小の中心は板の●印です。</p>
   <div id="chips" class="row"></div>
+  <div class="row" id="tools">
+    <button id="rotL90" title="左に90°">⟲90</button><button id="rotL15" title="左に15°">⟲15</button>
+    <button id="rotR15" title="右に15°">15⟳</button><button id="rotR90" title="右に90°">90⟳</button>
+    <button id="scDown" title="10%縮小">縮小−</button><button id="scUp" title="10%拡大">拡大＋</button>
+  </div>
   <div class="row">
     <button id="check">答え合わせ(+1回)</button>
     <button id="hint">お手本を3秒表示(+3回)</button>

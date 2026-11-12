@@ -26,12 +26,15 @@ app.post('/api/score', (req, res) => {
   const flag = Core.FLAGS.find(f => f.id === b.flag);
   if (!flag || !Core.INKS[b.mode]) return res.status(400).json({ error: 'invalid level' });
   const plates = Core.buildPlates(flag, b.mode);
-  const placements = {};
+  const placements = {}, rg = Core.range();
+  const num = (v, d) => (Number.isFinite(+v) ? Math.round(+v) : d);
   for (const pl of plates) {
     const p = (b.placements || {})[pl.id] || {};
     placements[pl.id] = {
-      x: Math.max(-8, Math.min(8, Math.round(+p.x || 0))),
-      y: Math.max(-6, Math.min(6, Math.round(+p.y || 0))),
+      x: Math.max(rg.x0, Math.min(rg.x1, num(p.x, 0))),
+      y: Math.max(rg.y0, Math.min(rg.y1, num(p.y, 0))),
+      rot: ((Math.round(num(p.rot, 0) / 15) * 15) % 360 + 360) % 360,
+      s10: Math.max(5, Math.min(20, num(p.s10, 10))),
       on: p.on !== false
     };
   }
