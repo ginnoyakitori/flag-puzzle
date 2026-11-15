@@ -32,6 +32,14 @@
       par += 1 + Math.min(k, 4 - k) + Math.abs(s10 - 10);
       return { id: sp.id, ink: sp.ink, ops: sp.ops, bb: sp.bb, hole: sp.hole, kind: sp.kind, x: x, y: y, rot: k * 90, s10: s10, on: true };
     });
+    var byInk = {};
+    plates.forEach(function (pl) { (byInk[pl.ink] = byInk[pl.ink] || []).push(pl); });
+    Object.keys(byInk).forEach(function (k) {
+      var g = byInk[k], nums = g.map(function (_, i) { return i + 1; });
+      nums.sort(function () { return Math.random() - 0.5; });
+      g.forEach(function (pl, i) { pl.dn = k + '板' + (g.length > 1 ? nums[i] : ''); });
+    });
+    plates.sort(function (a, b) { return a.dn < b.dn ? -1 : 1; });
     sel = null; moves = 0; solved = false; t0 = Date.now();
     $('q').textContent = 'お題:「' + flag.name + '」の国旗をつくろう(板は' + plates.length + '枚)';
     $('result').hidden = true; $('refbox').hidden = true; $('info').textContent = '';
@@ -208,11 +216,7 @@
     if (tab === 'stage') finishQuestion();
   }
 
-  function label(pl) {
-    var b = pl.bb, w = Math.round(b.x1 - b.x0), h = Math.round(b.y1 - b.y0);
-    var shape = pl.kind === 'c' ? '円φ' + w : pl.kind === 'r' ? w + '×' + h : pl.kind === 'p' ? '多角形' : w + '×' + h + '系';
-    return pl.ink + '板 ' + shape + (pl.hole ? ' 穴あり' : '') + ' ∠' + pl.rot + '° ×' + (pl.s10 / 10).toFixed(1);
-  }
+  function label(pl) { return pl.dn; } // 形・角度・倍率は表示しない
   function renderChips() {
     var box = $('chips'); box.innerHTML = '';
     plates.forEach(function (pl) {
