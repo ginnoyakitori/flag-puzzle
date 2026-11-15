@@ -1,8 +1,14 @@
 {
-  "name": "flag-light-plates",
+  "name": "color-flag-polyomino",
   "version": "1.0.0",
-  "description": "光の板(加法・減法混色)を動かして国旗をつくるパズル",
+  "description": "国旗 × 加法混色・減法混色 × ポリオミノのパズルゲーム",
   "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "express": "^4.19.2" }
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "private": true
 }

@@ -11,7 +11,10 @@ const path = require('path');
 const CFP = require('./shared.js');
 
 const PORT = process.env.PORT || 3000;
-const SCORE_FILE = path.join(__dirname, 'scores.json');
+// Render の Persistent Disk を使う場合は DATA_DIR=/var/data を指定(無料プランでは再デプロイで記録が消えます)
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { /* ignore */ }
+const SCORE_FILE = path.join(DATA_DIR, 'scores.json');
 
 const STATIC = {
   '/': 'index.html',
@@ -98,6 +101,11 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
 
   try {
+    if (req.method === 'GET' && url.pathname === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      return res.end('ok');
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/daily') {
       return sendJSON(res, 200, CFP.dailyInfo(todayJST()));
     }
@@ -109,7 +117,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/scores') {
-      const ip = req.socket.remoteAddress || '';
+      // Render などのプロキシ越しでは、実際のクライアントIPは X-Forwarded-For の先頭
+      const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '';
       if (rateLimited(ip)) return sendJSON(res, 429, { error: 'too many requests' });
       let data;
       try {
@@ -153,6 +162,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`カラーフラッグ・ポリオミノ: http://localhost:${PORT}`);
 });
