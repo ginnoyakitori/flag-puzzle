@@ -31,7 +31,15 @@ q=1/2/3 の旗は、フリー出題の「簡略版も含む197か国」でだけ
 - public/game-core.js … 旗データ・板の自動生成・一致判定(サーバーとブラウザで共有)
 - public/client.js … 描画(Canvasの lighter / multiply 合成)・ドラッグ操作・UI
 - public/index.html, style.css
+- public/flags/ … お手本用の国旗SVG(自分で配置)と _list.txt
+- check-flags.js … SVGの過不足チェック
 - data/ranking.json … 実行時に自動作成(Renderの無料枠では再起動で消えます)
+
+## お手本の国旗画像(SVG)
+「お手本を3秒表示」は、`public/flags/<国ID>.svg`(例: `jp.svg`)があればその画像を表示します。無い国は従来の図形による近似表示になります。
+画像は https://www.sekainokokki.jp/download の「ベクター画像(SVG)」から入手し、ファイル名を国ID(小文字2文字)にして置いてください。
+ファイル名と国名の対応は `public/flags/_list.txt`、そろい具合の確認は `node check-flags.js` でできます。
+(出典: sekainokokki.jp。非商用・商用とも自由に利用可、元データは Wikimedia Commons)
 
 ## 旗の追加
 public/flags-data.js に [ID, 国名, 品質q, スペック] を1行足すと、板が自動生成されます。記法はファイル先頭のコメントを参照。

@@ -146,6 +146,15 @@
     });
   }
 
+  // お手本の表示:public/flags/<国ID>.svg があればそれを表示し、無ければ図形で描いた近似版にもどる
+  function showRef() {
+    var img = $('refimg'), rc = $('ref'), id = flag.id;
+    img.hidden = true; rc.hidden = true;
+    img.onload = function () { if (flag.id === id) { rc.hidden = true; img.hidden = false; } };
+    img.onerror = function () { if (flag.id === id) { img.hidden = true; drawRef(); rc.hidden = false; } };
+    img.src = 'flags/' + id + '.svg';
+  }
+
   // ---- 操作 ----
   function worldPos(e) {
     var r = cv.getBoundingClientRect();
@@ -248,7 +257,7 @@
     $('info').textContent = '一致度:' + Math.round(r * 100) + '%  / 操作回数:' + moves;
   };
   $('hint').onclick = function () {
-    if (solved) return; moves += 3; drawRef(); $('refbox').hidden = false;
+    if (solved) return; moves += 3; showRef(); $('refbox').hidden = false;
     $('info').textContent = '操作回数:' + moves;
     clearTimeout(hintTimer); hintTimer = setTimeout(function () { $('refbox').hidden = true; }, 3000);
   };

@@ -17,7 +17,8 @@ canvas#cv{width:100%;height:auto;display:block;border:1px solid var(--line);bord
 .chip.sel{outline:3px solid var(--accent)}
 .sw{width:16px;height:16px;border-radius:50%;border:1px solid #888;display:inline-block}
 .info{font-size:.9rem;min-height:1.4em}
-.refbox{margin:6px 0}.refbox canvas{width:60%;border:1px solid var(--line)}
+.refbox{margin:6px 0}.refbox canvas,.refbox img{width:60%;max-width:360px;border:1px solid var(--line);display:block}
+.refbox [hidden]{display:none}
 .msg{font-weight:700;margin:12px 0 4px}
 #rank{padding-left:1.4em;margin:0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px}
