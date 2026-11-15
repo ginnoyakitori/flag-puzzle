@@ -9,6 +9,11 @@
 
   var mode = 'add', tab = 'stage', stageNo = 0, qIdx = 0, stageList = [], qStars = [], flag, plates = [], sel = null, moves = 0, par = 1, t0 = 0, solved = false, drag = null, hintTimer = null;
 
+  function isPoly() { return tab === 'poly'; }
+  function variant() { return isPoly() ? 'poly' : ''; }
+  function pk() { return mode + (isPoly() ? 'P' : ''); } // 進捗の保存キー
+  function passOf() { return isPoly() ? G.PASS_POLY : G.PASS; }
+  function snapTo(v, sn, a, b) { v = Math.round(v / sn) * sn; while (v < a) v += sn; while (v > b) v -= sn; return v; } // sn の倍数の位置にそろえる
   function ri(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
@@ -25,12 +30,14 @@
     opts = opts || { rot: true, scale: true };
     flag = G.flagById(id); if ([].some.call($('flagSel').options, function (o) { return o.value === id; })) $('flagSel').value = id;
     var rg = G.range(); par = 0;
-    plates = G.buildPlates(flag, mode).map(function (sp) {
-      var x, y, k = opts.rot && Math.random() < 0.6 ? ri(1, 3) : 0, s10 = opts.scale && Math.random() < 0.6 ? ri(6, 14) : 10;
-      if (opts.rot && opts.scale && s10 === 10 && k === 0) k = 1;
-      do { x = ri(rg.x0 + 2, rg.x1 - 2); y = ri(rg.y0 + 2, rg.y1 - 2); } while (Math.abs(x - sp.x) + Math.abs(y - sp.y) < 4);
-      par += 1 + Math.min(k, 4 - k) + Math.abs(s10 - 10);
-      return { id: sp.id, ink: sp.ink, ops: sp.ops, bb: sp.bb, hole: sp.hole, kind: sp.kind, x: x, y: y, rot: k * 90, s10: s10, on: true };
+    plates = G.buildPlates(flag, mode, variant()).map(function (sp) {
+      var poly = !!sp.poly, sn = sp.snap || 1, x, y;
+      var k = poly ? (Math.random() < 0.8 ? ri(1, 3) : 0) : (opts.rot && Math.random() < 0.6 ? ri(1, 3) : 0);
+      var s10 = !poly && opts.scale && Math.random() < 0.6 ? ri(6, 14) : 10;
+      if (!poly && opts.rot && opts.scale && s10 === 10 && k === 0) k = 1;
+      do { x = snapTo(ri(rg.x0 + 2, rg.x1 - 2), sn, rg.x0, rg.x1); y = snapTo(ri(rg.y0 + 2, rg.y1 - 2), sn, rg.y0, rg.y1); } while (Math.abs(x - sp.x) + Math.abs(y - sp.y) < 4);
+      par += (poly ? 4 : 1) + Math.min(k, 4 - k) + Math.abs(s10 - 10);
+      return { id: sp.id, ink: sp.ink, ops: sp.ops, bb: sp.bb, hole: sp.hole, kind: sp.kind, poly: poly, snap: sn, x: x, y: y, rot: k * 90, s10: s10, on: true };
     });
     var byInk = {};
     plates.forEach(function (pl) { (byInk[pl.ink] = byInk[pl.ink] || []).push(pl); });
@@ -41,7 +48,10 @@
     });
     plates.sort(function (a, b) { return a.dn < b.dn ? -1 : 1; });
     sel = null; moves = 0; solved = false; t0 = Date.now();
-    $('q').textContent = 'お題:「' + flag.name + '」の国旗をつくろう(板は' + plates.length + '枚)';
+    $('q').textContent = 'お題:「' + flag.name + '」の国旗をつくろう(板は' + plates.length + '枚' + (isPoly() ? '・重ねてつくる' : '') + ')';
+    $('playNote').textContent = isPoly()
+      ? 'ポリオミノ版:板はマス目に沿った形で、同じ色の板どうしを重ねてもかまいません。ただし、色をつける範囲からはみ出すと旗になりません。板は90°回転だけ、位置はマス目にそろいます。点線の枠(30×18)の中に国旗を完成させよう。回転の中心は板の●印です。'
+      : '板は単色で、形はいろいろです。穴(透明部分)があるのは、穴がないと旗にならない板だけ。板をドラッグで動かし、ボタンで回転・拡大縮小して、点線の枠(30×18)の中に国旗を完成させよう。回転と拡大縮小の中心は板の●印です。';
     $('result').hidden = true; $('refbox').hidden = true; $('info').textContent = '';
     renderChips(); draw(); loadRank();
   }
@@ -54,12 +64,12 @@
   // ---- ステージ ----
   function loadProg() { try { return JSON.parse(localStorage.getItem('fm-progress') || '{}'); } catch (e) { return {}; } }
   function saveProg(p) { try { localStorage.setItem('fm-progress', JSON.stringify(p)); } catch (e) { /* 保存できなくても遊べる */ } }
-  function showView(play) { $('stageView').hidden = play; $('playView').hidden = !play; $('freeBar').hidden = tab !== 'free'; $('stageBar').hidden = tab !== 'stage'; }
+  function showView(play) { $('stageView').hidden = play; $('playView').hidden = !play; $('freeBar').hidden = tab !== 'free'; $('stageBar').hidden = tab === 'free'; }
   function renderStages() {
     showView(false);
-    var prog = loadProg()[mode] || {}, all = $('unlockAll').checked, grid = $('stageGrid'); grid.innerHTML = '';
-    stageList = G.stages(mode);
-    $('stageHead').textContent = (mode === 'add' ? '加法混色' : '減法混色') + 'のステージ(全' + stageList.length + ')';
+    var prog = loadProg()[pk()] || {}, all = $('unlockAll').checked, grid = $('stageGrid'); grid.innerHTML = '';
+    stageList = isPoly() ? G.polyStages(mode) : G.stages(mode);
+    $('stageHead').textContent = (mode === 'add' ? '加法混色' : '減法混色') + (isPoly() ? '・ポリオミノ' : '') + 'のステージ(全' + stageList.length + ')';
     stageList.forEach(function (_, i) {
       var n = i + 1, b = document.createElement('button'), st = prog[n] ? prog[n].stars : 0;
       b.className = 'stg'; b.disabled = !(all || n === 1 || prog[n - 1]);
@@ -67,7 +77,9 @@
       b.onclick = function () { startStage(n); };
       grid.appendChild(b);
     });
-    $('stageNote').textContent = 'ステージ1は位置合わせだけ、2から板の向きがずれ、3から大きさもずれます。5問クリアで次のステージが開きます。';
+    $('stageNote').textContent = isPoly()
+      ? 'ポリオミノ版:単純な旗(' + G.polyFlags().length + 'か国)を、ポリオミノのような形の板を重ねてつくります。5問クリアで次のステージが開きます。'
+      : 'ステージ1は位置合わせだけ、2から板の向きがずれ、3から大きさもずれます。5問クリアで次のステージが開きます。';
   }
   function startStage(n) { stageNo = n; qIdx = 0; qStars = []; playQ(); }
   function playQ() {
@@ -80,8 +92,8 @@
     qStars[qIdx] = st; $('next').textContent = last ? 'ステージ選択へ' : '次の問題へ';
     if (!last) return;
     var avg = Math.max(1, Math.round(qStars.reduce(function (a, b) { return a + b; }, 0) / qStars.length));
-    var p = loadProg(); p[mode] = p[mode] || {};
-    if (!p[mode][stageNo] || p[mode][stageNo].stars < avg) p[mode][stageNo] = { stars: avg };
+    var p = loadProg(), key = pk(); p[key] = p[key] || {};
+    if (!p[key][stageNo] || p[key][stageNo].stars < avg) p[key][stageNo] = { stars: avg };
     saveProg(p); $('msg').textContent += '  🏆 ステージ' + stageNo + ' クリア!(' + '★★★'.slice(0, avg) + ')';
   }
   function nextAction() {
@@ -123,7 +135,8 @@
     if (sel && sel.on) { // 選択中の板:点線の枠と中心(●)
       ctx.save(); applyTf(ctx, sel);
       ctx.lineWidth = 2 / (sel.s10 / 10 * S); ctx.setLineDash([6 / S, 4 / S]); ctx.strokeStyle = '#4a90e2';
-      ctx.strokeRect(sel.bb.x0, sel.bb.y0, sel.bb.x1 - sel.bb.x0, sel.bb.y1 - sel.bb.y0);
+      if (sel.poly) sel.ops.forEach(function (o) { ctx.strokeRect(o.p.x, o.p.y, o.p.w, o.p.h); });
+      else ctx.strokeRect(sel.bb.x0, sel.bb.y0, sel.bb.x1 - sel.bb.x0, sel.bb.y1 - sel.bb.y0);
       ctx.restore();
       ctx.fillStyle = '#4a90e2'; ctx.beginPath(); ctx.arc((sel.x + OX) * S, (sel.y + OY) * S, 5, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.setLineDash([]); ctx.stroke();
@@ -164,7 +177,11 @@
     var a = pl.rot * Math.PI / 180, s = pl.s10 / 10, dx = p.x - pl.x, dy = p.y - pl.y;
     return { x: (dx * Math.cos(a) + dy * Math.sin(a)) / s, y: (-dx * Math.sin(a) + dy * Math.cos(a)) / s };
   }
-  function hits(pl, p) { var q = local(pl, p), b = pl.bb; return q.x >= b.x0 && q.x <= b.x1 && q.y >= b.y0 && q.y <= b.y1; }
+  function hits(pl, p) {
+    var q = local(pl, p), b = pl.bb;
+    if (!(q.x >= b.x0 && q.x <= b.x1 && q.y >= b.y0 && q.y <= b.y1)) return false;
+    return pl.poly ? G.hitPlate(pl, q.x, q.y) : true; // ポリオミノは形どおりに当たり判定
+  }
   function area(pl) { var b = pl.bb, s = pl.s10 / 10; return (b.x1 - b.x0) * (b.y1 - b.y0) * s * s; }
   function select(pl) { sel = pl; renderChips(); }
   cv.addEventListener('pointerdown', function (e) {
@@ -178,8 +195,9 @@
   });
   cv.addEventListener('pointermove', function (e) {
     if (!drag) return; var p = worldPos(e), rg = G.range();
-    drag.pl.x = clamp(Math.round(drag.x0 + p.x - drag.px), rg.x0, rg.x1);
-    drag.pl.y = clamp(Math.round(drag.y0 + p.y - drag.py), rg.y0, rg.y1);
+    var sn = drag.pl.snap || 1;
+    drag.pl.x = snapTo(drag.x0 + p.x - drag.px, sn, rg.x0, rg.x1);
+    drag.pl.y = snapTo(drag.y0 + p.y - drag.py, sn, rg.y0, rg.y1);
     draw();
   });
   function endDrag() {
@@ -192,19 +210,19 @@
 
   function move(dx, dy) {
     if (!sel || !sel.on || solved) return; var rg = G.range();
-    var nx = clamp(sel.x + dx, rg.x0, rg.x1), ny = clamp(sel.y + dy, rg.y0, rg.y1);
+    var sn = sel.snap || 1, nx = snapTo(sel.x + dx * sn, sn, rg.x0, rg.x1), ny = snapTo(sel.y + dy * sn, sn, rg.y0, rg.y1);
     if (nx === sel.x && ny === sel.y) return; sel.x = nx; sel.y = ny; moves++; afterMove();
   }
-  function rotate(d) { if (!sel || !sel.on || solved) return; sel.rot = (sel.rot + d + 360) % 360; moves++; renderChips(); afterMove(); }
+  function rotate(d) { if (!sel || !sel.on || solved || (sel.poly && d % 90 !== 0)) return; sel.rot = (sel.rot + d + 360) % 360; moves++; renderChips(); afterMove(); }
   function scale(d) {
-    if (!sel || !sel.on || solved) return; var n = clamp(sel.s10 + d, 5, 20);
+    if (!sel || !sel.on || solved || sel.poly) return; var n = clamp(sel.s10 + d, 5, 20);
     if (n === sel.s10) return; sel.s10 = n; moves++; renderChips(); afterMove();
   }
   cv.addEventListener('keydown', function (e) {
     var k = e.key, d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[k];
     if (d) { e.preventDefault(); move(d[0], d[1]); }
-    else if (k === 'q' || k === 'Q') rotate(e.shiftKey ? -90 : -15);
-    else if (k === 'e' || k === 'E') rotate(e.shiftKey ? 90 : 15);
+    else if (k === 'q' || k === 'Q') rotate(e.shiftKey || isPoly() ? -90 : -15);
+    else if (k === 'e' || k === 'E') rotate(e.shiftKey || isPoly() ? 90 : 15);
     else if (k === '-') scale(-1); else if (k === '+' || k === '=') scale(1);
   });
   $('rotL90').onclick = function () { rotate(-90); }; $('rotL15').onclick = function () { rotate(-15); };
@@ -212,7 +230,8 @@
   $('scDown').onclick = function () { scale(-1); }; $('scUp').onclick = function () { scale(1); };
   function updateTools() {
     var dis = !(sel && sel.on) || solved;
-    ['rotL90', 'rotL15', 'rotR15', 'rotR90', 'scDown', 'scUp'].forEach(function (id) { $(id).disabled = dis; });
+    ['rotL90', 'rotR90'].forEach(function (id) { $(id).disabled = dis; });
+    ['rotL15', 'rotR15', 'scDown', 'scUp'].forEach(function (id) { $(id).disabled = dis || isPoly(); }); // ポリオミノ版は90°回転だけ・拡大縮小なし
   }
 
   function placements() {
@@ -220,7 +239,7 @@
   }
   function afterMove() {
     draw(); $('info').textContent = '操作回数:' + moves;
-    if (G.evaluate(flag, mode, placements()) >= G.PASS) win();
+    if (G.evaluate(flag, mode, placements(), variant()) >= passOf()) win();
   }
   function stars() { return moves <= par * 1.5 ? '★★★' : moves <= par * 2.5 ? '★★☆' : '★☆☆'; }
   function win() {
@@ -230,7 +249,7 @@
     $('name').value = localStorage.getItem('fm-name') || '';
     $('send').disabled = false; $('result').hidden = false;
     $('next').textContent = tab === 'free' ? '次の国旗へ' : '次の問題へ';
-    if (tab === 'stage') finishQuestion();
+    if (tab !== 'free') finishQuestion();
   }
 
   function label(pl) { return pl.dn; } // 形・角度・倍率は表示しない
@@ -253,7 +272,7 @@
   // ---- ボタン類 ----
   $('check').onclick = function () {
     if (solved) return; moves++;
-    var r = G.evaluate(flag, mode, placements());
+    var r = G.evaluate(flag, mode, placements(), variant());
     $('info').textContent = '一致度:' + Math.round(r * 100) + '%  / 操作回数:' + moves;
   };
   $('hint').onclick = function () {
@@ -261,19 +280,19 @@
     $('info').textContent = '操作回数:' + moves;
     clearTimeout(hintTimer); hintTimer = setTimeout(function () { $('refbox').hidden = true; }, 3000);
   };
-  $('reset').onclick = function () { tab === 'stage' ? playQ() : start(flag.id); };
+  $('reset').onclick = function () { tab !== 'free' ? playQ() : start(flag.id); };
   $('rand').onclick = randomFlag; $('next').onclick = nextAction;
   $('flagSel').onchange = function () { start(this.value); };
   $('allFlags').onchange = function () { fillSelect(); randomFlag(); };
   $('back').onclick = renderStages; $('unlockAll').onchange = renderStages;
   function setTab(t) {
-    tab = t; $('t-stage').className = t === 'stage' ? 'on' : ''; $('t-free').className = t === 'free' ? 'on' : '';
-    if (t === 'stage') renderStages(); else { fillSelect(); showView(true); randomFlag(); }
+    tab = t; ['stage', 'free', 'poly'].forEach(function (k) { $('t-' + k).className = t === k ? 'on' : ''; });
+    if (t !== 'free') renderStages(); else { fillSelect(); showView(true); randomFlag(); }
   }
-  $('t-stage').onclick = function () { setTab('stage'); }; $('t-free').onclick = function () { setTab('free'); };
+  $('t-stage').onclick = function () { setTab('stage'); }; $('t-free').onclick = function () { setTab('free'); }; $('t-poly').onclick = function () { setTab('poly'); };
   function setMode(m) {
     mode = m; $('m-add').className = m === 'add' ? 'on' : ''; $('m-sub').className = m === 'sub' ? 'on' : '';
-    tab === 'stage' ? renderStages() : start(flag.id);
+    tab !== 'free' ? renderStages() : start(flag.id);
   }
   $('m-add').onclick = function () { setMode('add'); };
   $('m-sub').onclick = function () { setMode('sub'); };
@@ -283,13 +302,13 @@
     var name = $('name').value.trim() || '名無し'; localStorage.setItem('fm-name', name);
     $('send').disabled = true;
     fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ flag: flag.id, mode: mode, name: name, moves: moves, ms: Date.now() - t0, placements: placements() }) })
+      body: JSON.stringify({ flag: flag.id, mode: mode, variant: variant(), name: name, moves: moves, ms: Date.now() - t0, placements: placements() }) })
       .then(function (r) { return r.json(); })
       .then(function (j) { $('msg').textContent += j.ok ? '(記録しました)' : '(記録に失敗:' + j.error + ')'; loadRank(); })
       .catch(function () { $('msg').textContent += '(通信エラー)'; $('send').disabled = false; });
   };
   function loadRank() {
-    fetch('/api/ranking?flag=' + flag.id + '&mode=' + mode).then(function (r) { return r.json(); }).then(function (list) {
+    fetch('/api/ranking?flag=' + flag.id + '&mode=' + mode + '&variant=' + variant()).then(function (r) { return r.json(); }).then(function (list) {
       var ol = $('rank'); ol.innerHTML = '';
       if (!list.length) { ol.innerHTML = '<li>まだ記録がありません</li>'; return; }
       list.forEach(function (e) {

@@ -258,7 +258,8 @@
              kind: adds.length === 1 ? adds[0].p.t : 'x' };
   }
   var sets = {};
-  function buildPlates(flag, mode) {
+  function buildPlates(flag, mode, variant) {
+    if (variant === 'poly') return buildPolyPlates(flag, mode);
     var key = flag.id + mode; if (sets[key]) return sets[key];
     var out = [];
     INKS[mode].forEach(function (ink) {
@@ -280,11 +281,110 @@
     size = size || 5; var key = mode + size; if (stageCache[key]) return stageCache[key];
     var list = FLAGS.map(function (f) { return { id: f.id, d: difficulty(f, mode) }; })
       .sort(function (a, b) { return a.d - b.d || (a.id < b.id ? -1 : 1); });
+    return (stageCache[key] = chunk(list, size));
+  }
+  function chunk(list, size) { // 5問ずつに区切る(端数が3問未満なら前のステージへ)
     var out = [], i;
     for (i = 0; i < list.length; i += size) out.push(list.slice(i, i + size).map(function (x) { return x.id; }));
     if (out.length > 1 && out[out.length - 1].length < 3) out[out.length - 2] = out[out.length - 2].concat(out.pop());
-    return (stageCache[key] = out);
+    return out;
   }
+
+  // ---- ポリオミノ版(長方形だけでできた単純な旗) ----
+  // 各インクの色をつける範囲(マス目の集合)を、ポリオミノのような形の板で「重ねながら」おおう。
+  // 板は 90°回転だけ・拡大縮小なし・マス目の位置にだけ置ける。板の形は旗ごとに固定の乱数で決める(サーバーでも同じ板になる)。
+  var POLY_PASS = 0.9999, POLY_MAX = 14;
+  function rectOnly(f) { return !f.svg && f.q === 0 && f.regions.every(function (rg) { return rg.prims.every(function (p) { return p.t === 'r'; }); }); }
+  function polyCell(f) { // マス目の大きさ(2か3)。旗のすべての辺がマス目の線の上にある旗だけが対象。無ければ0
+    if (!rectOnly(f)) return 0;
+    var cs = [2, 3], i;
+    function ok(v, c) { var t = v / c; return Math.abs(t - Math.round(t)) < 1e-4; }
+    for (i = 0; i < cs.length; i++) {
+      if (f.regions.every(function (rg) { return rg.prims.every(function (p) { return ok(p.x, cs[i]) && ok(p.y, cs[i]) && ok(p.x + p.w, cs[i]) && ok(p.y + p.h, cs[i]); }); })) return cs[i];
+    }
+    return 0;
+  }
+  function rngOf(str) { // 文字列から決まる乱数(mulberry32)
+    var h = 2166136261, i; for (i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    var st = h >>> 0;
+    return function () { st = (st + 0x6D2B79F5) >>> 0; var t = st; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  function keyAt(f, x, y) { var i, rs = f.regions; for (i = rs.length - 1; i >= 0; i--) if (rs[i].prims.some(function (p) { return inPrim(p, x, y); })) return rs[i].color; return 'K'; }
+  // マスの集合 cells(番号=行×gw+列)を、重なりを許した複数のポリオミノでおおう。解(おおい方)が必ず存在する。
+  function coverPieces(cells, gw, gh, rnd) {
+    var inM = {}, rem = {}, left = cells.length, k0 = Math.max(5, Math.round(cells.length / 2.2)), pieces = [];
+    cells.forEach(function (c) { inM[c] = true; rem[c] = true; });
+    function nb(c) { var rw = Math.floor(c / gw), q = c % gw, o = []; if (q > 0) o.push(c - 1); if (q < gw - 1) o.push(c + 1); if (rw > 0) o.push(c - gw); if (rw < gh - 1) o.push(c + gw); return o; }
+    while (left > 0) {
+      // はしのマス(まだおおっていない隣が少ないマス)から始めると、細かいかけらが残りにくい
+      var rest = cells.filter(function (c) { return rem[c]; }), best = 9, cand = [];
+      rest.forEach(function (c) { var m = nb(c).filter(function (d) { return rem[d]; }).length; if (m < best) { best = m; cand = [c]; } else if (m === best) cand.push(c); });
+      var seed = cand[Math.floor(rnd() * cand.length)];
+      var k = Math.max(4, Math.round(k0 * (0.75 + 0.5 * rnd()))), shape = [seed], inS = {}; inS[seed] = true;
+      while (shape.length < k) {
+        var fr = [], w = [], tot = 0, t, j = 0;
+        shape.forEach(function (c) { nb(c).forEach(function (d) { if (inM[d] && !inS[d] && fr.indexOf(d) < 0) fr.push(d); }); });
+        if (!fr.length) break;
+        fr.forEach(function (d) { // まだおおっていないマス・すでに板に接している辺が多いマスを選びやすく(細い突起を減らす)
+          var wt = (rem[d] ? 3 : 1) * nb(d).filter(function (e2) { return inS[e2]; }).length; w.push(wt); tot += wt;
+        });
+        t = rnd() * tot; while (j < fr.length - 1 && t >= w[j]) { t -= w[j]; j++; }
+        shape.push(fr[j]); inS[fr[j]] = true;
+      }
+      shape.forEach(function (c) { if (rem[c]) { rem[c] = false; left--; } });
+      pieces.push(shape);
+    }
+    var cnt = {}; pieces.forEach(function (sh) { sh.forEach(function (c) { cnt[c] = (cnt[c] || 0) + 1; }); });
+    pieces.map(function (sh, i) { return i; }).sort(function (a, b) { return pieces[a].length - pieces[b].length; }).forEach(function (i) {
+      if (pieces[i].every(function (c) { return cnt[c] > 1; })) { pieces[i].forEach(function (c) { cnt[c]--; }); pieces[i] = null; } // 他の板だけで足りる板は捨てる
+    });
+    return pieces.filter(function (sh) { return sh; });
+  }
+  function polyPlate(id, ink, shape, gw, c) {
+    var sx = 0, sy = 0; shape.forEach(function (q) { sx += q % gw + 0.5; sy += Math.floor(q / gw) + 0.5; });
+    var px = Math.round(sx / shape.length), py = Math.round(sy / shape.length); // 回転の中心は、マス目の線の交点
+    var rects = mergeRects(shape.map(function (q) { return { t: 'r', x: (q % gw - px) * c, y: (Math.floor(q / gw) - py) * c, w: c, h: c }; }));
+    var bb = null; rects.forEach(function (q) { var b = bboxOf(q); bb = bb ? [Math.min(bb[0], b[0]), Math.min(bb[1], b[1]), Math.max(bb[2], b[2]), Math.max(bb[3], b[3])] : b; });
+    return { id: id, ink: ink, ops: rects.map(function (q) { return { op: 'add', p: q }; }), x: px * c, y: py * c,
+             bb: { x0: bb[0], y0: bb[1], x1: bb[2], y1: bb[3] }, hole: false, kind: 'x', poly: true, snap: c };
+  }
+  var polySets = {};
+  function buildPolyPlates(f, mode) {
+    var key = f.id + mode; if (polySets[key]) return polySets[key];
+    var c = polyCell(f), out = [];
+    if (!c) return (polySets[key] = out);
+    var gw = W / c, gh = H / c, rnd = rngOf(f.id + ':' + mode);
+    INKS[mode].forEach(function (ink) {
+      var cells = [], i, j;
+      for (j = 0; j < gh; j++) for (i = 0; i < gw; i++)
+        if (inksFor(mode, keyAt(f, (i + 0.5) * c, (j + 0.5) * c)).indexOf(ink) >= 0) cells.push(j * gw + i);
+      if (cells.length) coverPieces(cells, gw, gh, rnd).forEach(function (sh, n) { out.push(polyPlate(ink + (n + 1), ink, sh, gw, c)); });
+    });
+    return (polySets[key] = out);
+  }
+  var polyList = null;
+  function polyFlags() {
+    if (!polyList) polyList = FLAGS_ALL.filter(function (f) {
+      return polyCell(f) && ['add', 'sub'].every(function (m) { // 板が少なすぎず多すぎず、ただの長方形の板が3分の1以下のものだけ
+        var pl = buildPolyPlates(f, m), n = pl.length;
+        return n > 0 && n <= POLY_MAX && pl.filter(function (p) { return p.ops.length === 1; }).length * 3 <= n;
+      });
+    });
+    return polyList;
+  }
+  function polyDifficulty(f, mode) { // 板の枚数+おおうマスの数
+    var cells = 0, pl = buildPolyPlates(f, mode);
+    pl.forEach(function (p) { p.ops.forEach(function (o) { cells += o.p.w * o.p.h / (p.snap * p.snap); }); });
+    return pl.length + cells / 40;
+  }
+  var polyStageCache = {};
+  function polyStages(mode, size) {
+    size = size || 5; var key = mode + size; if (polyStageCache[key]) return polyStageCache[key];
+    var list = polyFlags().map(function (f) { return { id: f.id, d: polyDifficulty(f, mode) }; })
+      .sort(function (a, b) { return a.d - b.d || (a.id < b.id ? -1 : 1); });
+    return (polyStageCache[key] = chunk(list, size));
+  }
+  function hitPlate(pl, lx, ly) { return stateAt(pl.ops, lx, ly, true); } // 板の座標 (lx,ly) が板の上か(ポリオミノの形どおりに)
   function range() { return { x0: -WS.ox, x1: WS.w - WS.ox, y0: -WS.oy, y1: WS.h - WS.oy }; }
 
   // ---- 判定 ----
@@ -295,8 +395,8 @@
     var t = []; grid(function (x, y) { t.push(colorAt(flag, x, y)); });
     return (targets[flag.id] = t);
   }
-  function evaluate(flag, mode, placements) {
-    var plates = buildPlates(flag, mode), ok = 0, tot = 0, tg = targetGrid(flag), gi = 0;
+  function evaluate(flag, mode, placements, variant) {
+    var plates = buildPlates(flag, mode, variant), ok = 0, tot = 0, tg = targetGrid(flag), gi = 0;
     var tf = plates.map(function (p) {
       var c = placements[p.id]; if (!c || !c.on) return null;
       var rot = c.rot || 0, a = rot * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
@@ -318,6 +418,6 @@
   var FLAGS = FLAGS_ALL.filter(function (f) {
     return (f.q === 0 || f.q === 4) && ['add', 'sub'].every(function (m) { return buildPlates(f, m).length <= 10; });
   });
-  return { W: W, H: H, PASS: PASS, WS: WS, FLAGS: FLAGS, FLAGS_ALL: FLAGS_ALL, flagById: flagById, stages: stages, difficulty: difficulty, INKS: INKS, COLORS: COLORS,
+  return { W: W, H: H, PASS: PASS, PASS_POLY: POLY_PASS, WS: WS, polyFlags: polyFlags, polyStages: polyStages, polyCell: polyCell, hitPlate: hitPlate, FLAGS: FLAGS, FLAGS_ALL: FLAGS_ALL, flagById: flagById, stages: stages, difficulty: difficulty, INKS: INKS, COLORS: COLORS,
            buildPlates: buildPlates, available: available, evaluate: evaluate, colorAt: colorAt, mix: mix, range: range };
 });

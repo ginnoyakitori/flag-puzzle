@@ -2,6 +2,7 @@
   padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root{--bg:#1c1c1e;--fg:#eee;--card:#2a2a2d;--line:#555}}
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,"Hiragino Sans","Noto Sans JP",sans-serif}
 main{max-width:680px;margin:0 auto;padding:16px}
 h1{font-size:1.25rem;margin:0 0 12px}

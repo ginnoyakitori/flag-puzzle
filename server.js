@@ -17,15 +17,17 @@ function save() {
 const better = (a, b) => a.moves - b.moves || a.ms - b.ms;
 
 app.get('/api/ranking', (req, res) => {
-  const { flag, mode } = req.query;
-  res.json(ranking.filter(r => r.flag === flag && r.mode === mode).sort(better).slice(0, 10));
+  const { flag, mode } = req.query, variant = req.query.variant === 'poly' ? 'poly' : '';
+  res.json(ranking.filter(r => r.flag === flag && r.mode === mode && (r.variant || '') === variant).sort(better).slice(0, 10));
 });
 
 app.post('/api/score', (req, res) => {
   const b = req.body || {};
   const flag = Core.flagById(b.flag);
   if (!flag || !Core.INKS[b.mode]) return res.status(400).json({ error: 'invalid level' });
-  const plates = Core.buildPlates(flag, b.mode);
+  const variant = b.variant === 'poly' ? 'poly' : '';
+  if (variant && !Core.polyFlags().some(f => f.id === flag.id)) return res.status(400).json({ error: 'invalid level' });
+  const plates = Core.buildPlates(flag, b.mode, variant);
   const placements = {}, rg = Core.range();
   const num = (v, d) => (Number.isFinite(+v) ? Math.round(+v) : d);
   for (const pl of plates) {
@@ -33,18 +35,19 @@ app.post('/api/score', (req, res) => {
     placements[pl.id] = {
       x: Math.max(rg.x0, Math.min(rg.x1, num(p.x, 0))),
       y: Math.max(rg.y0, Math.min(rg.y1, num(p.y, 0))),
-      rot: ((Math.round(num(p.rot, 0) / 15) * 15) % 360 + 360) % 360,
-      s10: Math.max(5, Math.min(20, num(p.s10, 10))),
+      // ポリオミノ版は 90°回転だけ・拡大縮小なし
+      rot: ((Math.round(num(p.rot, 0) / (variant ? 90 : 15)) * (variant ? 90 : 15)) % 360 + 360) % 360,
+      s10: variant ? 10 : Math.max(5, Math.min(20, num(p.s10, 10))),
       on: p.on !== false
     };
   }
   // サーバー側でも正解かどうか再判定する
-  if (Core.evaluate(flag, b.mode, placements) < Core.PASS) return res.status(400).json({ error: 'not solved' });
+  if (Core.evaluate(flag, b.mode, placements, variant) < (variant ? Core.PASS_POLY : Core.PASS)) return res.status(400).json({ error: 'not solved' });
   const moves = Math.max(plates.length, Math.min(999, Math.round(+b.moves) || 999));
   const ms = Math.max(0, Math.min(3600000, Math.round(+b.ms) || 0));
   const name = String(b.name || '名無し').replace(/[<>&"']/g, '').slice(0, 12) || '名無し';
-  const entry = { flag: flag.id, mode: b.mode, name, moves, ms, at: Date.now() };
-  const i = ranking.findIndex(r => r.flag === entry.flag && r.mode === entry.mode && r.name === name);
+  const entry = { flag: flag.id, mode: b.mode, variant, name, moves, ms, at: Date.now() };
+  const i = ranking.findIndex(r => r.flag === entry.flag && r.mode === entry.mode && (r.variant || '') === variant && r.name === name);
   if (i < 0) ranking.push(entry);
   else if (better(entry, ranking[i]) < 0) ranking[i] = entry;
   save();
