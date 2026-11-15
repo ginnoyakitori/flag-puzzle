@@ -293,11 +293,11 @@
   // ---- ポリオミノ版(長方形だけでできた単純な旗) ----
   // 各インクの色をつける範囲(マス目の集合)を、ポリオミノのような形の板で「重ねながら」おおう。
   // 板は 90°回転だけ・拡大縮小なし・マス目の位置にだけ置ける。板の形は旗ごとに固定の乱数で決める(サーバーでも同じ板になる)。
-  var POLY_PASS = 0.9999, POLY_MAX = 14;
+  var POLY_PASS = 0.9999, POLY_MAX = 30;
   function rectOnly(f) { return !f.svg && f.q === 0 && f.regions.every(function (rg) { return rg.prims.every(function (p) { return p.t === 'r'; }); }); }
   function polyCell(f) { // マス目の大きさ(2か3)。旗のすべての辺がマス目の線の上にある旗だけが対象。無ければ0
     if (!rectOnly(f)) return 0;
-    var cs = [2, 3], i;
+    var cs = [6, 3, 2], i; // 大きいマス目ほど板の枚数が少なくてすむ
     function ok(v, c) { var t = v / c; return Math.abs(t - Math.round(t)) < 1e-4; }
     for (i = 0; i < cs.length; i++) {
       if (f.regions.every(function (rg) { return rg.prims.every(function (p) { return ok(p.x, cs[i]) && ok(p.y, cs[i]) && ok(p.x + p.w, cs[i]) && ok(p.y + p.h, cs[i]); }); })) return cs[i];
@@ -312,7 +312,7 @@
   function keyAt(f, x, y) { var i, rs = f.regions; for (i = rs.length - 1; i >= 0; i--) if (rs[i].prims.some(function (p) { return inPrim(p, x, y); })) return rs[i].color; return 'K'; }
   // マスの集合 cells(番号=行×gw+列)を、重なりを許した複数のポリオミノでおおう。解(おおい方)が必ず存在する。
   function coverPieces(cells, gw, gh, rnd) {
-    var inM = {}, rem = {}, left = cells.length, k0 = Math.max(5, Math.round(cells.length / 2.2)), pieces = [];
+    var inM = {}, rem = {}, left = cells.length, k0 = Math.min(10, Math.max(3, Math.round(cells.length / 7))), pieces = [];
     cells.forEach(function (c) { inM[c] = true; rem[c] = true; });
     function nb(c) { var rw = Math.floor(c / gw), q = c % gw, o = []; if (q > 0) o.push(c - 1); if (q < gw - 1) o.push(c + 1); if (rw > 0) o.push(c - gw); if (rw < gh - 1) o.push(c + gw); return o; }
     while (left > 0) {
@@ -320,7 +320,7 @@
       var rest = cells.filter(function (c) { return rem[c]; }), best = 9, cand = [];
       rest.forEach(function (c) { var m = nb(c).filter(function (d) { return rem[d]; }).length; if (m < best) { best = m; cand = [c]; } else if (m === best) cand.push(c); });
       var seed = cand[Math.floor(rnd() * cand.length)];
-      var k = Math.max(4, Math.round(k0 * (0.75 + 0.5 * rnd()))), shape = [seed], inS = {}; inS[seed] = true;
+      var k = Math.max(3, Math.round(k0 * (0.7 + 0.6 * rnd()))), shape = [seed], inS = {}; inS[seed] = true;
       while (shape.length < k) {
         var fr = [], w = [], tot = 0, t, j = 0;
         shape.forEach(function (c) { nb(c).forEach(function (d) { if (inM[d] && !inS[d] && fr.indexOf(d) < 0) fr.push(d); }); });
@@ -365,10 +365,7 @@
   var polyList = null;
   function polyFlags() {
     if (!polyList) polyList = FLAGS_ALL.filter(function (f) {
-      return polyCell(f) && ['add', 'sub'].every(function (m) { // 板が少なすぎず多すぎず、ただの長方形の板が3分の1以下のものだけ
-        var pl = buildPolyPlates(f, m), n = pl.length;
-        return n > 0 && n <= POLY_MAX && pl.filter(function (p) { return p.ops.length === 1; }).length * 3 <= n;
-      });
+      return polyCell(f) && ['add', 'sub'].every(function (m) { var n = buildPolyPlates(f, m).length; return n > 0 && n <= POLY_MAX; });
     });
     return polyList;
   }
