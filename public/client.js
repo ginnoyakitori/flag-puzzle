@@ -130,12 +130,20 @@
     }
     updateTools();
   }
+  // お手本:板と同じく図形(長方形・円・多角形)のまま塗る
   function drawRef() {
-    var c = $('ref').getContext('2d'), k = $('ref').width / G.W, x, y;
-    for (x = 0; x < G.W; x++) for (y = 0; y < G.H; y++) {
-      c.fillStyle = 'rgb(' + G.colorAt(flag, x + 0.5, y + 0.5).join(',') + ')';
-      c.fillRect(x * k, y * k, k + 1, k + 1);
-    }
+    var rc = $('ref'), c = rc.getContext('2d'), k = 20;
+    rc.width = G.W * k; rc.height = G.H * k;
+    c.setTransform(k, 0, 0, k, 0, 0);
+    c.fillStyle = 'rgb(' + G.COLORS.K.join(',') + ')'; c.fillRect(0, 0, G.W, G.H);
+    flag.regions.forEach(function (rg) {
+      c.fillStyle = 'rgb(' + G.COLORS[rg.color].join(',') + ')';
+      rg.prims.forEach(function (p) {
+        if (p.t === 'r') { c.beginPath(); c.rect(p.x, p.y, p.w + 0.03, p.h + 0.03); } // 隣の図形との細い隙間を防ぐ
+        else path(c, p);
+        c.fill();
+      });
+    });
   }
 
   // ---- 操作 ----
