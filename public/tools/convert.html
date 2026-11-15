@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>国旗SVG → 板データ変換</title>
+<style>
+body{font-family:system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;margin:0;padding:16px;max-width:980px;margin:0 auto;line-height:1.5}
+h1{font-size:1.2rem} button{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #999;background:#fff;cursor:pointer}
+button:disabled{opacity:.5;cursor:default} .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:10px 0}
+label{font-size:.9rem} input[type=number]{width:5em} table{border-collapse:collapse;width:100%;font-size:.85rem}
+td,th{border-bottom:1px solid #ddd;padding:4px 6px;text-align:left;vertical-align:middle} canvas,img.o{width:120px;height:72px;border:1px solid #ccc;display:block;object-fit:fill;background:#eee}
+.ok{color:#080}.warn{color:#b60}.ng{color:#c00}.mute{color:#888}
+#sum{font-weight:700}
+</style>
+</head>
+<body>
+<h1>国旗SVG → 板データ変換</h1>
+<p>public/flags/ に置いた国旗SVG(<code>jp.svg</code> など)を読み、6色の領域(多角形)に変換して <code>flags-svg.js</code> を作ります。作ったファイルを <code>public/flags-svg.js</code> に上書きするとゲームに反映されます。</p>
+<div class="row">
+  <label><input type="checkbox" id="all"> 形も色も忠実な旗(q=0)も変換する</label>
+  <label>細かさ(1単位あたりのピクセル数) <input type="number" id="res" value="32" min="16" max="64"></label>
+  <label>消す小ささ(単位²) <input type="number" id="minA" value="0.04" step="0.01" min="0"></label>
+</div>
+<div class="row"><button id="go">変換を始める</button><button id="dl" disabled>flags-svg.js をダウンロード</button><span id="sum"></span></div>
+<table><thead><tr><th>ID</th><th>国名</th><th>状態</th><th>多角形</th><th>一致率</th><th>SVG</th><th>変換後</th></tr></thead><tbody id="tb"></tbody></table>
+<script src="../flags-data.js"></script>
+<script src="../vectorize.js"></script>
+<script src="convert.js"></script>
+</body>
+</html>

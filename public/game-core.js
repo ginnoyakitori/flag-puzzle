@@ -3,8 +3,13 @@
   if (typeof module === 'object' && module.exports) module.exports = factory(root);
   else root.GameCore = factory(root);
 })(typeof window !== 'undefined' ? window : this, function (root) {
-  var DATA = (typeof module === 'object' && module.exports) ? require('./flags-data.js') : root.FlagData;
+  var NODE = typeof module === 'object' && module.exports;
+  var DATA = NODE ? require('./flags-data.js') : root.FlagData;
+  // 実際の国旗SVGから変換した旗データ(任意)。無い国・ファイルが無いときは従来の図形データを使う
+  var SVGD = {};
+  try { SVGD = (NODE ? require('./flags-svg.js') : root.FlagSvg) || {}; } catch (e) { SVGD = {}; }
   var W = 30, H = 18, PASS = 0.995;
+  var EM_W = 12, EM_H = 10.8; // これより小さい図形(紋章・星など)は、同じインクの1枚の板にまとめる
   var WS = { w: 46, h: 30, ox: 8, oy: 6 }; // 作業台の大きさと旗の枠の位置
   var COLORS = { W: [255,255,255], K: [0,0,0], R: [255,0,0], G: [0,255,0], B: [0,0,255], Y: [255,255,0] };
   var INKS = { add: ['R','G','B'], sub: ['C','M','Y'] };
@@ -75,7 +80,27 @@
     return out;
   }
   // q: 0=忠実 / 4=紋章を円・星・多角形で近似(0と4がステージ出題の対象) / 1=色を近似 / 2=細部を省略 / 3=両方
-  var FLAGS_ALL = DATA.map(function (d) { return { id: d[0], name: d[1], q: d[2], regions: parseSpec(d[3]) }; });
+  // SVG由来の領域: [[色, [x1,y1,x2,y2,...]], ...](下から順に重ねる)。長方形は長方形の図形に、小さい多角形には em の印をつける
+  function regionsFromSvg(list) {
+    // 最初(いちばん大きい)の領域の色で全面を下ぬりして、多角形どうしの境目のごく細い隙間をなくす
+    var f0 = list.length ? list[0][1] : [], i0, full = f0.length === 8; // 最初の領域がすでに全面の長方形なら下ぬりは不要
+    for (i0 = 0; full && i0 < 8; i0 += 2) full = (f0[i0] === 0 || f0[i0] === W) && (f0[i0 + 1] === 0 || f0[i0 + 1] === H);
+    var base = list.length && !full ? [reg(list[0][0], [r(0, 0, W, H)])] : [];
+    return base.concat(list.map(function (it) {
+      var a = it[1], pts = [], i, p, b, e = 0.02;
+      for (i = 0; i + 1 < a.length; i += 2) pts.push([a[i], a[i + 1]]);
+      b = bboxOf({ t: 'p', pts: pts });
+      if (pts.length === 4 && pts.every(function (q) { return (Math.abs(q[0] - b[0]) < e || Math.abs(q[0] - b[2]) < e) && (Math.abs(q[1] - b[1]) < e || Math.abs(q[1] - b[3]) < e); }))
+        return reg(it[0], [r(b[0], b[1], b[2] - b[0], b[3] - b[1])]);
+      p = poly(pts, null);
+      if (b[2] - b[0] < EM_W && b[3] - b[1] < EM_H) p.em = true;
+      return reg(it[0], [p]);
+    }));
+  }
+  var FLAGS_ALL = DATA.map(function (d) {
+    var sv = SVGD[d[0]];
+    return sv ? { id: d[0], name: d[1], q: 4, svg: true, regions: regionsFromSvg(sv) } : { id: d[0], name: d[1], q: d[2], regions: parseSpec(d[3]) };
+  });
   function flagById(id) { return FLAGS_ALL.filter(function (f) { return f.id === id; })[0]; }
 
   function inPoly(pts, x, y) {
@@ -89,6 +114,8 @@
   function inPrim(p, x, y) {
     if (p.t === 'r') return x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h;
     if (p.t === 'c') { var dx = x - p.cx, dy = y - p.cy; return dx * dx + dy * dy <= p.r * p.r; }
+    var b = p.bb || (p.bb = bboxOf(p)); // 多角形は外接長方形で先にふるいにかける(頂点の多い旗でも速くする)
+    if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) return false;
     return inPoly(p.pts, x, y);
   }
   function eqv(a, b) { return a[0] === b[0] && a[1] === b[1] && a[2] === b[2]; }
@@ -113,9 +140,9 @@
     return (cache[key] = res);
   }
   function colorAt(flag, x, y) {
-    var out = 'K';
-    flag.regions.forEach(function (rg) { if (rg.prims.some(function (p) { return inPrim(p, x, y); })) out = rg.color; });
-    return COLORS[out];
+    var i, rs = flag.regions; // 後の領域ほど上。上から探して最初に当たった色
+    for (i = rs.length - 1; i >= 0; i--) if (rs[i].prims.some(function (p) { return inPrim(p, x, y); })) return COLORS[rs[i].color];
+    return COLORS.K;
   }
 
   // ---- 板の生成 ----
@@ -165,18 +192,28 @@
     return used ? ops : null;
   }
   // このインクの板は穴なし(単色の図形だけ)で作れるか?
+  // 図形 p の外接長方形に入る判定用の点(30×18 を 0.5 刻みにした格子)だけを調べ、中にある点の番号を fn に渡す
+  function cellsIn(p, fn) {
+    var b = bboxOf(p), N = W * 2, M = H * 2;
+    var i0 = Math.max(0, Math.ceil(b[0] * 2 - 0.5)), i1 = Math.min(N - 1, Math.floor(b[2] * 2 - 0.5));
+    var j0 = Math.max(0, Math.ceil(b[1] * 2 - 0.5)), j1 = Math.min(M - 1, Math.floor(b[3] * 2 - 0.5)), i, j;
+    for (i = i0; i <= i1; i++) for (j = j0; j <= j1; j++) if (inPrim(p, (i + 0.5) / 2, (j + 0.5) / 2)) fn(i * M + j);
+  }
   function needsHole(ops) {
-    var need = false;
-    grid(function (x, y) { if (!need && stateAt(ops, x, y, false) !== stateAt(ops, x, y, true)) need = true; });
-    return need;
+    var s1 = new Uint8Array(W * 2 * H * 2), s2 = new Uint8Array(W * 2 * H * 2), k;
+    ops.forEach(function (o) {
+      cellsIn(o.p, function (c) { if (o.op === 'add') { s1[c] = 1; s2[c] = 1; } else s1[c] = 0; });
+    });
+    for (k = 0; k < s1.length; k++) if (s1[k] !== s2[k]) return true;
+    return false;
   }
   // 実際に何かを消している穴だけ残す
   function usefulSubs(ops) {
-    return ops.filter(function (o, i) {
-      if (o.op === 'add') return true;
-      var before = ops.slice(0, i), hit = false;
-      grid(function (x, y) { if (!hit && inPrim(o.p, x, y) && stateAt(before, x, y, false)) hit = true; });
-      return hit;
+    var s = new Uint8Array(W * 2 * H * 2);
+    return ops.filter(function (o) {
+      var useful = o.op === 'add';
+      cellsIn(o.p, function (c) { if (o.op === 'add') s[c] = 1; else { if (s[c]) useful = true; s[c] = 0; } });
+      return useful;
     });
   }
   function mergeRuns(ops) {
@@ -191,7 +228,8 @@
     flush(); return out;
   }
   function solidGroups(ops) {
-    var ps = ops.filter(function (o) { return o.op === 'add'; }).map(function (o) { return o.p; });
+    var all = ops.filter(function (o) { return o.op === 'add'; }).map(function (o) { return o.p; });
+    var ps = all.filter(function (p) { return !p.em; }), em = all.filter(function (p) { return p.em; });
     var rects = mergeRects(ps.filter(function (p) { return p.t === 'r'; }));
     var others = ps.filter(function (p) { return p.t !== 'r'; });
     rects = rects.filter(function (b, i) {
@@ -199,7 +237,11 @@
       return !rects.some(function (a, j) { return j !== i && inBox(bboxOf(a), bb) && (!inBox(bb, bboxOf(a)) || j < i); });
     });
     others = others.filter(function (q) { return !rects.some(function (a) { return inBox(bboxOf(a), bboxOf(q)); }); });
-    return rects.concat(others).map(function (p) { return [{ op: 'add', p: p }]; });
+    em = em.filter(function (q) { return !rects.some(function (a) { return inBox(bboxOf(a), bboxOf(q)); }); });
+    var groups = rects.concat(others).map(function (p) { return [{ op: 'add', p: p }]; });
+    // 紋章・星などの小さい図形は、同じインクなら全部まとめて1枚の板にする
+    if (em.length) groups.push(em.map(function (p) { return { op: 'add', p: p }; }));
+    return groups;
   }
   function makePlate(id, ink, ops) {
     var adds = ops.filter(function (o) { return o.op === 'add'; }), pv = null, bb = null;
@@ -247,8 +289,14 @@
 
   // ---- 判定 ----
   // placements: { R1:{x,y,rot,s10,on}, ... }  rot=度(15刻み)、s10=倍率×10(10=等倍)
+  var targets = {};
+  function targetGrid(flag) { // お手本の色を格子ごとに一度だけ求めておく
+    if (targets[flag.id]) return targets[flag.id];
+    var t = []; grid(function (x, y) { t.push(colorAt(flag, x, y)); });
+    return (targets[flag.id] = t);
+  }
   function evaluate(flag, mode, placements) {
-    var plates = buildPlates(flag, mode), ok = 0, tot = 0;
+    var plates = buildPlates(flag, mode), ok = 0, tot = 0, tg = targetGrid(flag), gi = 0;
     var tf = plates.map(function (p) {
       var c = placements[p.id]; if (!c || !c.on) return null;
       var rot = c.rot || 0, a = rot * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
@@ -262,7 +310,7 @@
         var dx = x - t.x, dy = y - t.y;
         if (stateAt(t.p.ops, (dx * t.cs + dy * t.sn) / t.s, (-dx * t.sn + dy * t.cs) / t.s, false)) set.push(t.p.ink);
       });
-      tot++; if (eqv(mix(mode, set), colorAt(flag, x, y))) ok++;
+      tot++; if (eqv(mix(mode, set), tg[gi++])) ok++;
     });
     return ok / tot;
   }

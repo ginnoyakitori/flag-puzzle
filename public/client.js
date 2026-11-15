@@ -17,7 +17,7 @@
   function fillSelect() {
     var sl = $('flagSel'); sl.innerHTML = '';
     pool().forEach(function (f) {
-      var o = document.createElement('option'); o.value = f.id; o.textContent = f.name + (f.q ? '(簡略)' : ''); sl.appendChild(o);
+      var o = document.createElement('option'); o.value = f.id; o.textContent = f.name + (f.q && !f.svg ? '(簡略)' : ''); sl.appendChild(o);
     });
   }
   // opts: 最初に板をずらす内容(ステージ1は位置だけ、2以降で回転、3以降で拡大縮小)
