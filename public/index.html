@@ -1,71 +1,102 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>光の板で国旗をつくろう</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>カラーフラッグ・ポリオミノ</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<main>
-  <h1>光の板で国旗をつくろう</h1>
-  <div class="row">
-    <button id="m-add" class="on">加法混色(光 R G B)</button>
-    <button id="m-sub">減法混色(フィルター C M Y)</button>
-  </div>
-  <div class="row">
-    <button id="t-stage" class="on">ステージ</button>
-    <button id="t-free">フリー出題</button>
-    <button id="t-poly">ポリオミノ(上級)</button>
-  </div>
-  <section id="stageView">
-    <h2 id="stageHead">ステージ選択</h2>
-    <div id="stageGrid" class="grid"></div>
-    <p class="note" id="stageNote"></p>
-    <label class="note"><input type="checkbox" id="unlockAll"> 全ステージを開放する</label>
-  </section>
-  <section id="playView" hidden>
-  <div class="row" id="freeBar">
-    <select id="flagSel"></select>
-    <button id="rand">おまかせ出題</button>
-    <label class="note"><input type="checkbox" id="allFlags"> 簡略版も含む197か国</label>
-  </div>
-  <div class="row" id="stageBar">
-    <button id="back">← ステージ選択</button><span id="stageInfo"></span>
-  </div>
-  <div id="q" class="q"></div>
-  <canvas id="cv" tabindex="0"></canvas>
-  <p class="note" id="playNote">板は単色で、形はいろいろです。穴(透明部分)があるのは、穴がないと旗にならない板だけ。板をドラッグで動かし、ボタンで回転・拡大縮小して、点線の枠(30×18)の中に国旗を完成させよう。回転と拡大縮小の中心は板の●印です。</p>
-  <div id="chips" class="row"></div>
-  <div class="row" id="tools">
-    <button id="rotL90" title="左に90°">⟲90</button><button id="rotL15" title="左に15°">⟲15</button>
-    <button id="rotR15" title="右に15°">15⟳</button><button id="rotR90" title="右に90°">90⟳</button>
-    <button id="scDown" title="10%縮小">縮小−</button><button id="scUp" title="10%拡大">拡大＋</button>
-  </div>
-  <div class="row">
-    <button id="check">答え合わせ(+1回)</button>
-    <button id="hint">お手本を3秒表示(+3回)</button>
-    <button id="reset">やり直す</button>
-  </div>
-  <div id="info" class="info"></div>
-  <div id="refbox" class="refbox" hidden><img id="refimg" alt="お手本の国旗" hidden><canvas id="ref" width="300" height="180" hidden></canvas></div>
-  <section id="result" hidden>
-    <div id="msg" class="msg"></div>
-    <div class="row">
-      <input id="name" maxlength="12" placeholder="名前(ランキング用)">
-      <button id="send">記録を送る</button>
-      <button id="next">次の国旗へ</button>
-    </div>
-  </section>
-  <section>
-    <h2>ランキング(操作回数が少ない順)</h2>
-    <ol id="rank"></ol>
-  </section>
-  </section>
-</main>
-<script src="flags-data.js"></script>
-<script src="flags-svg.js"></script>
-<script src="game-core.js"></script>
-<script src="client.js"></script>
+  <header class="top">
+    <h1>カラーフラッグ・ポリオミノ</h1>
+    <p class="lead">光(加法混色)と絵の具(減法混色)の色ピースを重ねて、国旗を完成させよう。</p>
+  </header>
+
+  <main class="layout">
+    <aside class="panel" id="flagPanel">
+      <h2>国旗を選ぶ <small id="clearCount"></small></h2>
+      <div id="flagList" class="flag-list"></div>
+    </aside>
+
+    <section class="panel game">
+      <div class="toolbar">
+        <div class="seg" id="modeSeg" role="group" aria-label="モード">
+          <button data-mode="light">💡 光(RGB)</button>
+          <button data-mode="paint">🎨 絵の具(CMY)</button>
+        </div>
+        <div class="seg" id="levelSeg" role="group" aria-label="難易度">
+          <button data-level="easy">かんたん</button>
+          <button data-level="normal">ふつう</button>
+          <button data-level="hard">むずかしい</button>
+        </div>
+        <button id="dailyBtn" class="accent">📅 今日の1問</button>
+        <button id="newBtn">🔀 新しい問題</button>
+      </div>
+
+      <div class="status">
+        <div class="title"><span id="flagName">-</span> <span id="badge" class="badge"></span></div>
+        <div class="stat">⏱ <b id="timer">00:00</b></div>
+        <div class="stat">手数 <b id="moves">0</b></div>
+        <div class="stat">一致 <b id="match">0/0</b></div>
+      </div>
+      <div class="bar"><div id="barFill"></div></div>
+
+      <div class="stage">
+        <div class="board-col">
+          <div id="boardWrap"><div id="board" aria-label="盤面"></div></div>
+          <div class="actions">
+            <button id="rotBtn" title="Rキー">⟳ 回転</button>
+            <button id="flipBtn" title="Fキー">⇋ 反転</button>
+            <button id="undoBtn">↩ 1つ戻す</button>
+            <button id="resetBtn">⟲ リセット</button>
+            <button id="hintBtn">💡 ヒント</button>
+            <button id="solveBtn">👀 答えを見る</button>
+          </div>
+        </div>
+
+        <div class="side-col">
+          <div class="target-box">
+            <div class="label">目標の国旗</div>
+            <canvas id="target" width="180" height="120"></canvas>
+          </div>
+          <div class="rule-box" id="ruleBox"></div>
+        </div>
+      </div>
+
+      <div class="tray-head">ピース <small id="trayInfo"></small></div>
+      <div id="tray" class="tray"></div>
+      <p class="help">
+        ピースをクリックで選択 → 盤面をクリックで配置。置いたピースは盤面でクリックすると拾い直せます。
+        <kbd>R</kbd>回転 <kbd>F</kbd>反転 <kbd>Esc</kbd>選択解除。同じ色のピース同士は重ねられません。
+      </p>
+    </section>
+
+    <aside class="panel" id="rankPanel">
+      <h2>ランキング</h2>
+      <div id="rankKey" class="muted"></div>
+      <ol id="rankList" class="rank"></ol>
+    </aside>
+  </main>
+
+  <dialog id="clearDialog">
+    <form method="dialog" id="clearForm">
+      <h2>🎉 クリア!</h2>
+      <p id="clearFlag" class="big"></p>
+      <p id="clearNote" class="note"></p>
+      <p id="clearStat" class="muted"></p>
+      <div id="submitRow">
+        <input id="nameInput" maxlength="12" placeholder="名前(12文字まで)">
+        <button type="button" id="submitBtn" class="accent">記録を送る</button>
+      </div>
+      <p id="submitMsg" class="muted"></p>
+      <div class="dlg-actions">
+        <button type="button" id="nextBtn" class="accent">次の問題へ</button>
+        <button value="close">閉じる</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="shared.js"></script>
+  <script src="client.js"></script>
 </body>
 </html>

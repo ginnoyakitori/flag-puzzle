@@ -1,323 +1,640 @@
-(function () {
-  var G = GameCore, S = 14, OX = G.WS.ox, OY = G.WS.oy, WW = G.WS.w, WH = G.WS.h; // 作業台46×30、旗の枠は(8,6)から30×18
-  var INKCOL = { R: '#f00', G: '#0f0', B: '#00f', C: '#0ff', M: '#f0f', Y: '#ff0' };
-  var $ = function (id) { return document.getElementById(id); };
-  var cv = $('cv'), ctx = cv.getContext('2d');
-  cv.width = WW * S; cv.height = WH * S;
-  var off = document.createElement('canvas'); off.width = cv.width; off.height = cv.height;
-  var octx = off.getContext('2d');
+/* client.js : ゲーム本体(ブラウザ側) */
+(() => {
+  'use strict';
+  const { FLAGS, HEX, PRIMARIES, NEED, LEVELS, buildPuzzle, mix, rotate, flip, dailyInfo } = CFP;
+  const $ = (s) => document.querySelector(s);
 
-  var mode = 'add', tab = 'stage', stageNo = 0, qIdx = 0, stageList = [], qStars = [], flag, plates = [], sel = null, moves = 0, par = 1, t0 = 0, solved = false, drag = null, hintTimer = null;
+  const MODE_LABEL = { light: '光', paint: '絵の具' };
 
-  function isPoly() { return tab === 'poly'; }
-  function variant() { return isPoly() ? 'poly' : ''; }
-  function pk() { return mode + (isPoly() ? 'P' : ''); } // 進捗の保存キー
-  function passOf() { return isPoly() ? G.PASS_POLY : G.PASS; }
-  function snapTo(v, sn, a, b) { v = Math.round(v / sn) * sn; while (v < a) v += sn; while (v > b) v -= sn; return v; } // sn の倍数の位置にそろえる
-  function ri(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  const state = {
+    flagId: 'fr',
+    mode: 'light',
+    level: 'normal',
+    seed: 0,
+    daily: null,          // 今日の1問のとき {date,...}
+    puzzle: null,
+    placed: [],           // [{id, cells:[[r,c],...]}] 置いた順
+    shapes: {},           // id -> 現在の向きの形
+    selected: null,
+    hover: null,
+    hint: false,
+    moves: 0,
+    startedAt: 0,
+    elapsed: 0,
+    timer: null,
+    cleared: false,
+    assisted: false,      // 「答えを見る」を使った
+  };
 
-  // ---- 出題 ----
-  function pool() { return G.available($('allFlags').checked); }
-  function fillSelect() {
-    var sl = $('flagSel'); sl.innerHTML = '';
-    pool().forEach(function (f) {
-      var o = document.createElement('option'); o.value = f.id; o.textContent = f.name + (f.q && !f.svg ? '(簡略)' : ''); sl.appendChild(o);
-    });
-  }
-  // opts: 最初に板をずらす内容(ステージ1は位置だけ、2以降で回転、3以降で拡大縮小)
-  function start(id, opts) {
-    opts = opts || { rot: true, scale: true };
-    flag = G.flagById(id); if ([].some.call($('flagSel').options, function (o) { return o.value === id; })) $('flagSel').value = id;
-    var rg = G.range(); par = 0;
-    plates = G.buildPlates(flag, mode, variant()).map(function (sp) {
-      var poly = !!sp.poly, sn = sp.snap || 1, x, y;
-      var k = poly ? (Math.random() < 0.8 ? ri(1, 3) : 0) : (opts.rot && Math.random() < 0.6 ? ri(1, 3) : 0);
-      var s10 = !poly && opts.scale && Math.random() < 0.6 ? ri(6, 14) : 10;
-      if (!poly && opts.rot && opts.scale && s10 === 10 && k === 0) k = 1;
-      do { x = snapTo(ri(rg.x0 + 2, rg.x1 - 2), sn, rg.x0, rg.x1); y = snapTo(ri(rg.y0 + 2, rg.y1 - 2), sn, rg.y0, rg.y1); } while (Math.abs(x - sp.x) + Math.abs(y - sp.y) < 4);
-      par += (poly ? 4 : 1) + Math.min(k, 4 - k) + Math.abs(s10 - 10);
-      return { id: sp.id, ink: sp.ink, ops: sp.ops, bb: sp.bb, hole: sp.hole, kind: sp.kind, poly: poly, snap: sn, x: x, y: y, rot: k * 90, s10: s10, on: true };
-    });
-    var byInk = {};
-    plates.forEach(function (pl) { (byInk[pl.ink] = byInk[pl.ink] || []).push(pl); });
-    Object.keys(byInk).forEach(function (k) {
-      var g = byInk[k], nums = g.map(function (_, i) { return i + 1; });
-      nums.sort(function () { return Math.random() - 0.5; });
-      g.forEach(function (pl, i) { pl.dn = k + '板' + (g.length > 1 ? nums[i] : ''); });
-    });
-    plates.sort(function (a, b) { return a.dn < b.dn ? -1 : 1; });
-    sel = null; moves = 0; solved = false; t0 = Date.now();
-    $('q').textContent = 'お題:「' + flag.name + '」の国旗をつくろう(板は' + plates.length + '枚' + (isPoly() ? '・重ねてつくる' : '') + ')';
-    $('playNote').textContent = isPoly()
-      ? 'ポリオミノ版:板はマス目に沿った形で、同じ色の板どうしを重ねてもかまいません。ただし、色をつける範囲からはみ出すと旗になりません。板は90°回転だけ、位置はマス目にそろいます。点線の枠(30×18)の中に国旗を完成させよう。回転の中心は板の●印です。'
-      : '板は単色で、形はいろいろです。穴(透明部分)があるのは、穴がないと旗にならない板だけ。板をドラッグで動かし、ボタンで回転・拡大縮小して、点線の枠(30×18)の中に国旗を完成させよう。回転と拡大縮小の中心は板の●印です。';
-    $('result').hidden = true; $('refbox').hidden = true; $('info').textContent = '';
-    renderChips(); draw(); loadRank();
-  }
-  function randomFlag() {
-    var list = pool(), n;
-    do { n = list[ri(0, list.length - 1)]; } while (list.length > 1 && n === flag);
-    start(n.id);
-  }
+  let cellEls = [];
+  let clearedMap = {};
+  try { clearedMap = JSON.parse(localStorage.getItem('cfp-cleared') || '{}'); } catch (e) { clearedMap = {}; }
 
-  // ---- ステージ ----
-  function loadProg() { try { return JSON.parse(localStorage.getItem('fm-progress') || '{}'); } catch (e) { return {}; } }
-  function saveProg(p) { try { localStorage.setItem('fm-progress', JSON.stringify(p)); } catch (e) { /* 保存できなくても遊べる */ } }
-  function showView(play) { $('stageView').hidden = play; $('playView').hidden = !play; $('freeBar').hidden = tab !== 'free'; $('stageBar').hidden = tab === 'free'; }
-  function renderStages() {
-    showView(false);
-    var prog = loadProg()[pk()] || {}, all = $('unlockAll').checked, grid = $('stageGrid'); grid.innerHTML = '';
-    stageList = isPoly() ? G.polyStages(mode) : G.stages(mode);
-    $('stageHead').textContent = (mode === 'add' ? '加法混色' : '減法混色') + (isPoly() ? '・ポリオミノ' : '') + 'のステージ(全' + stageList.length + ')';
-    stageList.forEach(function (_, i) {
-      var n = i + 1, b = document.createElement('button'), st = prog[n] ? prog[n].stars : 0;
-      b.className = 'stg'; b.disabled = !(all || n === 1 || prog[n - 1]);
-      b.innerHTML = (b.disabled ? '🔒 ' : '') + n + '<small>' + (st ? '★★★'.slice(0, st) + '☆☆☆'.slice(0, 3 - st) : '未クリア') + '</small>';
-      b.onclick = function () { startStage(n); };
-      grid.appendChild(b);
-    });
-    $('stageNote').textContent = isPoly()
-      ? 'ポリオミノ版:単純な旗(' + G.polyFlags().length + 'か国)を、ポリオミノのような形の板を重ねてつくります。5問クリアで次のステージが開きます。'
-      : 'ステージ1は位置合わせだけ、2から板の向きがずれ、3から大きさもずれます。5問クリアで次のステージが開きます。';
-  }
-  function startStage(n) { stageNo = n; qIdx = 0; qStars = []; playQ(); }
-  function playQ() {
-    showView(true);
-    $('stageInfo').textContent = 'ステージ' + stageNo + '  第' + (qIdx + 1) + '問 / ' + stageList[stageNo - 1].length;
-    start(stageList[stageNo - 1][qIdx], { rot: stageNo >= 2, scale: stageNo >= 3 });
-  }
-  function finishQuestion() {
-    var last = qIdx === stageList[stageNo - 1].length - 1, st = (stars().match(/★/g) || []).length;
-    qStars[qIdx] = st; $('next').textContent = last ? 'ステージ選択へ' : '次の問題へ';
-    if (!last) return;
-    var avg = Math.max(1, Math.round(qStars.reduce(function (a, b) { return a + b; }, 0) / qStars.length));
-    var p = loadProg(), key = pk(); p[key] = p[key] || {};
-    if (!p[key][stageNo] || p[key][stageNo].stars < avg) p[key][stageNo] = { stars: avg };
-    saveProg(p); $('msg').textContent += '  🏆 ステージ' + stageNo + ' クリア!(' + '★★★'.slice(0, avg) + ')';
-  }
-  function nextAction() {
-    if (tab === 'free') return randomFlag();
-    if (qIdx < stageList[stageNo - 1].length - 1) { qIdx++; playQ(); } else renderStages();
-  }
+  // ---------- 基本ヘルパー ----------
+  const pieceById = (id) => state.puzzle.pieces.find((p) => p.id === id);
+  const isPlaced = (id) => state.placed.some((p) => p.id === id);
 
-  // ---- 描画(単色の板を lighter=加法 / multiply=減法 で重ねる) ----
-  function path(c, p) {
-    c.beginPath();
-    if (p.t === 'r') c.rect(p.x, p.y, p.w, p.h);
-    else if (p.t === 'c') c.arc(p.cx, p.cy, p.r, 0, Math.PI * 2);
-    else { p.pts.forEach(function (q, i) { i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]); }); c.closePath(); }
-  }
-  function applyTf(c, pl) {
-    c.translate((pl.x + OX) * S, (pl.y + OY) * S); c.rotate(pl.rot * Math.PI / 180); c.scale(pl.s10 / 10 * S, pl.s10 / 10 * S);
-  }
-  function draw() {
-    var add = mode === 'add';
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = add ? '#000' : '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
-    plates.forEach(function (pl) {
-      if (!pl.on) return;
-      octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, off.width, off.height);
-      octx.save(); applyTf(octx, pl); octx.fillStyle = INKCOL[pl.ink];
-      pl.ops.forEach(function (o) {
-        octx.globalCompositeOperation = o.op === 'add' ? 'source-over' : 'destination-out';
-        path(octx, o.p); octx.fill();
-      });
-      octx.restore(); octx.globalCompositeOperation = 'source-over';
-      ctx.globalCompositeOperation = add ? 'lighter' : 'multiply';
-      ctx.drawImage(off, 0, 0);
-    });
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = 'rgba(128,128,128,.4)'; ctx.beginPath();
-    ctx.rect(0, 0, cv.width, cv.height); ctx.rect(OX * S, OY * S, G.W * S, G.H * S); ctx.fill('evenodd');
-    ctx.lineWidth = 2; ctx.setLineDash([]); ctx.strokeStyle = add ? '#ddd' : '#444';
-    ctx.strokeRect(OX * S, OY * S, G.W * S, G.H * S);
-    if (sel && sel.on) { // 選択中の板:点線の枠と中心(●)
-      ctx.save(); applyTf(ctx, sel);
-      ctx.lineWidth = 2 / (sel.s10 / 10 * S); ctx.setLineDash([6 / S, 4 / S]); ctx.strokeStyle = '#4a90e2';
-      if (sel.poly) sel.ops.forEach(function (o) { ctx.strokeRect(o.p.x, o.p.y, o.p.w, o.p.h); });
-      else ctx.strokeRect(sel.bb.x0, sel.bb.y0, sel.bb.x1 - sel.bb.x0, sel.bb.y1 - sel.bb.y0);
-      ctx.restore();
-      ctx.fillStyle = '#4a90e2'; ctx.beginPath(); ctx.arc((sel.x + OX) * S, (sel.y + OY) * S, 5, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.setLineDash([]); ctx.stroke();
+  function anchorOf(shape) {
+    const cr = shape.reduce((s, c) => s + c[0], 0) / shape.length;
+    const cc = shape.reduce((s, c) => s + c[1], 0) / shape.length;
+    let best = shape[0];
+    let bd = 1e9;
+    for (const c of shape) {
+      const d = (c[0] - cr) ** 2 + (c[1] - cc) ** 2;
+      if (d < bd) { bd = d; best = c; }
     }
-    updateTools();
+    return best;
   }
-  // お手本:板と同じく図形(長方形・円・多角形)のまま塗る
-  function drawRef() {
-    var rc = $('ref'), c = rc.getContext('2d'), k = 20;
-    rc.width = G.W * k; rc.height = G.H * k;
-    c.setTransform(k, 0, 0, k, 0, 0);
-    c.fillStyle = 'rgb(' + G.COLORS.K.join(',') + ')'; c.fillRect(0, 0, G.W, G.H);
-    flag.regions.forEach(function (rg) {
-      c.fillStyle = 'rgb(' + G.COLORS[rg.color].join(',') + ')';
-      rg.prims.forEach(function (p) {
-        if (p.t === 'r') { c.beginPath(); c.rect(p.x, p.y, p.w + 0.03, p.h + 0.03); } // 隣の図形との細い隙間を防ぐ
-        else path(c, p);
-        c.fill();
+
+  function computeLayers() {
+    const P = state.puzzle;
+    const layers = Array.from({ length: P.rows }, () => Array.from({ length: P.cols }, () => []));
+    for (const pl of state.placed) {
+      const color = pieceById(pl.id).color;
+      for (const [r, c] of pl.cells) layers[r][c].push(color);
+    }
+    return layers;
+  }
+
+  function canPlace(cells, color, layers) {
+    const P = state.puzzle;
+    return cells.every(([r, c]) => r >= 0 && c >= 0 && r < P.rows && c < P.cols && !layers[r][c].includes(color));
+  }
+
+  function fmtTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+  }
+
+  // ---------- 描画: 国旗サムネイル ----------
+  function drawFlag(canvas, grid, unit) {
+    const rows = grid.length;
+    const cols = grid[0].length;
+    const u = unit || Math.floor(Math.min(canvas.width / cols, canvas.height / rows));
+    canvas.width = cols * u;
+    canvas.height = rows * u;
+    const ctx = canvas.getContext('2d');
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        ctx.fillStyle = HEX[grid[r][c]];
+        ctx.fillRect(c * u, r * u, u, u);
+      }
+    }
+  }
+
+  function renderFlagList() {
+    const list = $('#flagList');
+    list.innerHTML = '';
+    for (const f of FLAGS) {
+      const el = document.createElement('div');
+      el.className = 'flag-item' + (f.id === state.flagId && !state.daily ? ' active' : '');
+      el.dataset.id = f.id;
+      const cv = document.createElement('canvas');
+      cv.width = 72; cv.height = 48;
+      drawFlag(cv, f.grid, 12);
+      const nm = document.createElement('div');
+      nm.className = 'nm';
+      nm.textContent = f.name;
+      const bd = document.createElement('div');
+      bd.className = 'bd';
+      const lt = clearedMap[f.id + ':light'];
+      const pt = clearedMap[f.id + ':paint'];
+      bd.innerHTML = `<span class="${lt ? 'done' : ''}">光${lt ? '✓' : '・'}</span> <span class="${pt ? 'done' : ''}">絵${pt ? '✓' : '・'}</span>`;
+      el.append(cv, nm, bd);
+      list.appendChild(el);
+    }
+    const n = Object.keys(clearedMap).length;
+    $('#clearCount').textContent = `(クリア ${n}/${FLAGS.length * 2})`;
+  }
+
+  // ---------- 描画: 盤面 ----------
+  function buildBoard() {
+    const P = state.puzzle;
+    const board = $('#board');
+    board.innerHTML = '';
+    board.classList.remove('win');
+    board.style.setProperty('--cols', P.cols);
+    board.style.setProperty('--rows', P.rows);
+    cellEls = [];
+    for (let r = 0; r < P.rows; r++) {
+      const row = [];
+      for (let c = 0; c < P.cols; c++) {
+        const el = document.createElement('div');
+        el.className = 'cell';
+        el.dataset.r = r;
+        el.dataset.c = c;
+        board.appendChild(el);
+        row.push(el);
+      }
+      cellEls.push(row);
+    }
+    fitBoard();
+  }
+
+  function fitBoard() {
+    if (!state.puzzle) return;
+    const P = state.puzzle;
+    const wrap = $('#boardWrap');
+    const avail = Math.max(200, Math.min(wrap.clientWidth || 520, 560) - 20);
+    const cs = Math.max(30, Math.min(64, Math.floor((avail - 2 * (P.cols - 1)) / P.cols)));
+    $('#board').style.setProperty('--cs', cs + 'px');
+  }
+
+  function updateBoard() {
+    const P = state.puzzle;
+    const layers = computeLayers();
+
+    // 各マスにかかっているピース(輪郭描画用)
+    const cover = Array.from({ length: P.rows }, () => Array.from({ length: P.cols }, () => []));
+    for (const pl of state.placed) {
+      const set = new Set(pl.cells.map(([r, c]) => r * 64 + c));
+      const color = pieceById(pl.id).color;
+      for (const [r, c] of pl.cells) {
+        cover[r][c].push({
+          color,
+          top: !set.has((r - 1) * 64 + c),
+          bottom: !set.has((r + 1) * 64 + c),
+          left: !set.has(r * 64 + c - 1),
+          right: !set.has(r * 64 + c + 1),
+        });
+      }
+    }
+
+    // ゴースト(置く前のプレビュー)
+    const ghostMap = new Map();
+    if (state.selected && state.hover) {
+      const sh = state.shapes[state.selected];
+      const [ar, ac] = anchorOf(sh);
+      const cells = sh.map(([r, c]) => [r - ar + state.hover[0], c - ac + state.hover[1]]);
+      const color = pieceById(state.selected).color;
+      const ok = canPlace(cells, color, layers);
+      for (const [r, c] of cells) ghostMap.set(r * 64 + c, { color, ok });
+    }
+
+    let match = 0;
+    for (let r = 0; r < P.rows; r++) {
+      for (let c = 0; c < P.cols; c++) {
+        const el = cellEls[r][c];
+        const letter = mix(P.mode, layers[r][c]);
+        const target = P.grid[r][c];
+        const ok = letter === target;
+        if (ok) match++;
+        el.style.background = HEX[letter];
+        el.innerHTML = '';
+
+        for (const cv of cover[r][c]) {
+          const idx = PRIMARIES[P.mode].indexOf(cv.color);
+          const off = 2 + idx * 4;
+          const d = document.createElement('div');
+          d.className = 'pc';
+          d.style.borderColor = HEX[cv.color];
+          d.style.top = (cv.top ? off : 0) + 'px';
+          d.style.bottom = (cv.bottom ? off : 0) + 'px';
+          d.style.left = (cv.left ? off : 0) + 'px';
+          d.style.right = (cv.right ? off : 0) + 'px';
+          d.style.borderTopWidth = cv.top ? '3px' : '0';
+          d.style.borderBottomWidth = cv.bottom ? '3px' : '0';
+          d.style.borderLeftWidth = cv.left ? '3px' : '0';
+          d.style.borderRightWidth = cv.right ? '3px' : '0';
+          el.appendChild(d);
+        }
+
+        const g = ghostMap.get(r * 64 + c);
+        if (g) {
+          const d = document.createElement('div');
+          d.className = 'ghost' + (g.ok ? '' : ' bad');
+          d.style.background = HEX[g.color];
+          el.appendChild(d);
+        }
+
+        if (state.hint) {
+          const t = document.createElement('div');
+          t.className = 'tgt';
+          t.style.background = HEX[target];
+          el.appendChild(t);
+          const n = document.createElement('div');
+          n.className = 'need';
+          n.textContent = NEED[P.mode][target].join('') || '–';
+          el.appendChild(n);
+          if (ok) {
+            const k = document.createElement('div');
+            k.className = 'chk';
+            k.textContent = '✓';
+            el.appendChild(k);
+          }
+        }
+      }
+    }
+
+    const total = P.rows * P.cols;
+    $('#match').textContent = `${match}/${total}`;
+    $('#barFill').style.width = (match / total * 100) + '%';
+    return match === total;
+  }
+
+  // ---------- 描画: トレイ ----------
+  function renderTray() {
+    const tray = $('#tray');
+    tray.innerHTML = '';
+    for (const p of state.puzzle.pieces) {
+      const shape = state.shapes[p.id];
+      const w = Math.max(...shape.map((c) => c[1])) + 1;
+      const h = Math.max(...shape.map((c) => c[0])) + 1;
+      const el = document.createElement('div');
+      el.className = 'piece' + (state.selected === p.id ? ' sel' : '') + (isPlaced(p.id) ? ' placed' : '');
+      el.dataset.id = p.id;
+      el.style.gridTemplateColumns = `repeat(${w}, 18px)`;
+      el.style.gridTemplateRows = `repeat(${h}, 18px)`;
+      for (const [r, c] of shape) {
+        const m = document.createElement('div');
+        m.className = 'mc';
+        m.style.gridRow = r + 1;
+        m.style.gridColumn = c + 1;
+        m.style.background = HEX[p.color];
+        el.appendChild(m);
+      }
+      tray.appendChild(el);
+    }
+    const left = state.puzzle.pieces.filter((p) => !isPlaced(p.id)).length;
+    $('#trayInfo').textContent = `(残り ${left} / ${state.puzzle.pieces.length} 個)`;
+  }
+
+  function renderRules() {
+    const P = state.puzzle;
+    const prim = PRIMARIES[P.mode];
+    const swatch = (l) => `<span class="sw" style="background:${HEX[l]}"></span>`;
+    let html = '';
+    if (P.mode === 'light') {
+      html += '<b>光の混色(足し算)</b>';
+      html += `<div class="row">何もない=${swatch('K')}黒</div>`;
+      html += `<div class="row">${swatch('R')}+${swatch('G')}=${swatch('Y')}黄</div>`;
+      html += `<div class="row">${swatch('G')}+${swatch('B')}=${swatch('C')}</div>`;
+      html += `<div class="row">${swatch('R')}+${swatch('B')}=${swatch('M')}</div>`;
+      html += `<div class="row">${swatch('R')}+${swatch('G')}+${swatch('B')}=${swatch('W')}白</div>`;
+    } else {
+      html += '<b>絵の具の混色(重ね塗り)</b>';
+      html += `<div class="row">何もない=${swatch('W')}白</div>`;
+      html += `<div class="row">${swatch('C')}+${swatch('M')}=${swatch('B')}青</div>`;
+      html += `<div class="row">${swatch('M')}+${swatch('Y')}=${swatch('R')}赤</div>`;
+      html += `<div class="row">${swatch('Y')}+${swatch('C')}=${swatch('G')}緑</div>`;
+      html += `<div class="row">${swatch('C')}+${swatch('M')}+${swatch('Y')}=${swatch('K')}黒</div>`;
+    }
+    html += `<div class="row" style="margin-top:6px">使う原色: ${prim.map((p) => swatch(p)).join(' ')}</div>`;
+    $('#ruleBox').innerHTML = html;
+  }
+
+  function renderHeader() {
+    const P = state.puzzle;
+    $('#flagName').textContent = P.name;
+    const b = $('#badge');
+    b.textContent = state.daily
+      ? `今日の1問 ${state.daily.date}`
+      : `${MODE_LABEL[P.mode]}・${LEVELS[P.level].label}`;
+    b.className = 'badge' + (state.daily ? ' daily' : '');
+    if (state.daily) b.textContent += `(${MODE_LABEL[P.mode]})`;
+    document.querySelectorAll('#modeSeg button').forEach((x) => x.classList.toggle('on', x.dataset.mode === state.mode));
+    document.querySelectorAll('#levelSeg button').forEach((x) => x.classList.toggle('on', x.dataset.level === state.level));
+    $('#hintBtn').classList.toggle('on', state.hint);
+    $('#moves').textContent = state.moves;
+    $('#timer').textContent = fmtTime(state.elapsed);
+    drawFlag($('#target'), P.grid, 20);
+    document.querySelectorAll('.flag-item').forEach((el) =>
+      el.classList.toggle('active', el.dataset.id === state.flagId && !state.daily));
+  }
+
+  function renderAll() {
+    renderHeader();
+    renderTray();
+    const done = updateBoard();
+    return done;
+  }
+
+  // ---------- パズル開始 ----------
+  function stopTimer() {
+    if (state.timer) { clearInterval(state.timer); state.timer = null; }
+  }
+
+  function startPuzzle(opts = {}) {
+    stopTimer();
+    if (opts.flagId) state.flagId = opts.flagId;
+    if (opts.mode) state.mode = opts.mode;
+    if (opts.level) state.level = opts.level;
+    state.seed = opts.seed != null ? opts.seed >>> 0 : (Math.random() * 4294967296) >>> 0;
+    state.daily = opts.daily || null;
+    state.puzzle = buildPuzzle(state.flagId, state.mode, state.level, state.seed);
+    state.placed = [];
+    state.shapes = {};
+    for (const p of state.puzzle.pieces) state.shapes[p.id] = p.shape.map((c) => c.slice());
+    state.selected = null;
+    state.hover = null;
+    state.moves = 0;
+    state.startedAt = 0;
+    state.elapsed = 0;
+    state.cleared = false;
+    state.assisted = false;
+    buildBoard();
+    renderRules();
+    renderAll();
+    loadRanking();
+  }
+
+  function resetCurrent() {
+    stopTimer();
+    state.placed = [];
+    state.selected = null;
+    state.hover = null;
+    state.moves = 0;
+    state.startedAt = 0;
+    state.elapsed = 0;
+    state.cleared = false;
+    state.assisted = false;
+    for (const p of state.puzzle.pieces) state.shapes[p.id] = p.shape.map((c) => c.slice());
+    $('#board').classList.remove('win');
+    renderAll();
+  }
+
+  function ensureTimer() {
+    if (state.startedAt || state.cleared) return;
+    state.startedAt = Date.now();
+    state.timer = setInterval(() => {
+      state.elapsed = (Date.now() - state.startedAt) / 1000;
+      $('#timer').textContent = fmtTime(state.elapsed);
+    }, 250);
+  }
+
+  // ---------- 操作 ----------
+  function select(id) {
+    if (state.cleared) return;
+    state.selected = state.selected === id ? null : id;
+    renderTray();
+    updateBoard();
+  }
+
+  function transformSelected(fn) {
+    if (!state.selected) return;
+    state.shapes[state.selected] = fn(state.shapes[state.selected]);
+    renderTray();
+    updateBoard();
+  }
+
+  function shake() {
+    const b = $('#board');
+    b.classList.remove('shake');
+    void b.offsetWidth;
+    b.classList.add('shake');
+  }
+
+  function placeAt(r, c) {
+    const id = state.selected;
+    const P = state.puzzle;
+    const sh = state.shapes[id];
+    const [ar, ac] = anchorOf(sh);
+    const cells = sh.map(([rr, cc]) => [rr - ar + r, cc - ac + c]);
+    const layers = computeLayers();
+    if (!canPlace(cells, pieceById(id).color, layers)) { shake(); return; }
+    ensureTimer();
+    state.placed.push({ id, cells });
+    state.selected = null;
+    state.moves++;
+    $('#moves').textContent = state.moves;
+    renderTray();
+    const done = updateBoard();
+    if (done && !state.cleared) onClear();
+  }
+
+  function pickUp(r, c) {
+    for (let i = state.placed.length - 1; i >= 0; i--) {
+      if (state.placed[i].cells.some(([rr, cc]) => rr === r && cc === c)) {
+        const [pl] = state.placed.splice(i, 1);
+        state.selected = pl.id;
+        state.hover = [r, c];
+        renderTray();
+        updateBoard();
+        return;
+      }
+    }
+  }
+
+  function undo() {
+    if (state.cleared || !state.placed.length) return;
+    state.placed.pop();
+    state.selected = null;
+    renderTray();
+    updateBoard();
+  }
+
+  function showSolution() {
+    if (state.cleared) return;
+    state.placed = state.puzzle.pieces.map((p) => ({ id: p.id, cells: p.solution.map((c) => c.slice()) }));
+    state.selected = null;
+    state.assisted = true;
+    stopTimer();
+    renderTray();
+    updateBoard();
+    $('#board').classList.add('win');
+  }
+
+  // ---------- クリア ----------
+  function onClear() {
+    state.cleared = true;
+    stopTimer();
+    if (state.startedAt) state.elapsed = (Date.now() - state.startedAt) / 1000;
+    $('#timer').textContent = fmtTime(state.elapsed);
+    $('#board').classList.add('win');
+
+    const P = state.puzzle;
+    clearedMap[P.flagId + ':' + P.mode] = true;
+    try { localStorage.setItem('cfp-cleared', JSON.stringify(clearedMap)); } catch (e) { /* ignore */ }
+    renderFlagList();
+
+    $('#clearFlag').textContent = `${P.name}(${MODE_LABEL[P.mode]})を完成!`;
+    $('#clearNote').textContent = P.note;
+    $('#clearStat').textContent = `タイム ${fmtTime(state.elapsed)} ・ 手数 ${state.moves}`;
+    $('#submitMsg').textContent = '';
+    $('#submitBtn').disabled = false;
+    try { $('#nameInput').value = localStorage.getItem('cfp-name') || ''; } catch (e) { /* ignore */ }
+    setTimeout(() => {
+      const dlg = $('#clearDialog');
+      if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+    }, 500);
+  }
+
+  // ---------- ランキング(サーバー) ----------
+  const rankKey = () => (state.daily ? 'daily:' + state.daily.date : `${state.flagId}:${state.mode}:${state.level}`);
+
+  function renderRanking(list) {
+    const ol = $('#rankList');
+    ol.innerHTML = '';
+    if (!list || !list.length) {
+      const li = document.createElement('li');
+      li.className = 'muted';
+      li.style.listStyle = 'none';
+      li.textContent = 'まだ記録がありません';
+      ol.appendChild(li);
+      return;
+    }
+    for (const s of list) {
+      const li = document.createElement('li');
+      const name = document.createElement('span');
+      name.textContent = s.name + ' ';
+      const t = document.createElement('span');
+      t.className = 't';
+      t.textContent = fmtTime(s.time);
+      const m = document.createElement('span');
+      m.className = 'm';
+      m.textContent = ` (${s.moves}手)`;
+      li.append(name, t, m);
+      ol.appendChild(li);
+    }
+  }
+
+  async function loadRanking() {
+    const P = state.puzzle;
+    $('#rankKey').textContent = state.daily
+      ? `今日の1問(${state.daily.date})`
+      : `${P.name}・${MODE_LABEL[P.mode]}・${LEVELS[P.level].label}`;
+    try {
+      const res = await fetch('/api/scores?key=' + encodeURIComponent(rankKey()));
+      if (!res.ok) throw new Error('http ' + res.status);
+      const data = await res.json();
+      renderRanking(data.scores);
+    } catch (e) {
+      renderRanking(null);
+      $('#rankKey').textContent += '(サーバーに接続できません)';
+    }
+  }
+
+  async function submitScore() {
+    const name = $('#nameInput').value.trim();
+    try { localStorage.setItem('cfp-name', name); } catch (e) { /* ignore */ }
+    $('#submitBtn').disabled = true;
+    try {
+      const res = await fetch('/api/scores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: rankKey(), name, time: state.elapsed, moves: state.moves }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'error');
+      renderRanking(data.scores);
+      $('#submitMsg').textContent = '記録を送りました!ランキングを更新しました。';
+    } catch (e) {
+      $('#submitMsg').textContent = '送信できませんでした(' + e.message + ')。';
+      $('#submitBtn').disabled = false;
+    }
+  }
+
+  // ---------- 今日の1問 ----------
+  async function loadDaily() {
+    let info;
+    try {
+      const res = await fetch('/api/daily');
+      if (!res.ok) throw new Error();
+      info = await res.json();
+    } catch (e) {
+      const d = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+      info = dailyInfo(d);
+    }
+    startPuzzle({ flagId: info.flagId, mode: info.mode, level: info.level, seed: info.seed, daily: info });
+  }
+
+  // ---------- イベント ----------
+  function cellOf(e) {
+    const el = e.target.closest && e.target.closest('.cell');
+    return el ? [Number(el.dataset.r), Number(el.dataset.c)] : null;
+  }
+
+  function bindEvents() {
+    $('#flagList').addEventListener('click', (e) => {
+      const it = e.target.closest('.flag-item');
+      if (it) startPuzzle({ flagId: it.dataset.id });
     });
-  }
 
-  // お手本の表示:public/flags/<国ID>.svg があればそれを表示し、無ければ図形で描いた近似版にもどる
-  function showRef() {
-    var img = $('refimg'), rc = $('ref'), id = flag.id;
-    img.hidden = true; rc.hidden = true;
-    img.onload = function () { if (flag.id === id) { rc.hidden = true; img.hidden = false; } };
-    img.onerror = function () { if (flag.id === id) { img.hidden = true; drawRef(); rc.hidden = false; } };
-    img.src = 'flags/' + id + '.svg';
-  }
-
-  // ---- 操作 ----
-  function worldPos(e) {
-    var r = cv.getBoundingClientRect();
-    return { x: (e.clientX - r.left) / r.width * WW - OX, y: (e.clientY - r.top) / r.height * WH - OY };
-  }
-  function local(pl, p) { // 世界座標→板の座標
-    var a = pl.rot * Math.PI / 180, s = pl.s10 / 10, dx = p.x - pl.x, dy = p.y - pl.y;
-    return { x: (dx * Math.cos(a) + dy * Math.sin(a)) / s, y: (-dx * Math.sin(a) + dy * Math.cos(a)) / s };
-  }
-  function hits(pl, p) {
-    var q = local(pl, p), b = pl.bb;
-    if (!(q.x >= b.x0 && q.x <= b.x1 && q.y >= b.y0 && q.y <= b.y1)) return false;
-    return pl.poly ? G.hitPlate(pl, q.x, q.y) : true; // ポリオミノは形どおりに当たり判定
-  }
-  function area(pl) { var b = pl.bb, s = pl.s10 / 10; return (b.x1 - b.x0) * (b.y1 - b.y0) * s * s; }
-  function select(pl) { sel = pl; renderChips(); }
-  cv.addEventListener('pointerdown', function (e) {
-    if (solved) return; cv.focus();
-    var p = worldPos(e), hit = null;
-    plates.forEach(function (pl) { if (pl.on && hits(pl, p) && (!hit || area(pl) < area(hit))) hit = pl; });
-    if (!hit) return;
-    select(hit);
-    drag = { pl: hit, px: p.x, py: p.y, x0: hit.x, y0: hit.y };
-    cv.setPointerCapture(e.pointerId); draw();
-  });
-  cv.addEventListener('pointermove', function (e) {
-    if (!drag) return; var p = worldPos(e), rg = G.range();
-    var sn = drag.pl.snap || 1;
-    drag.pl.x = snapTo(drag.x0 + p.x - drag.px, sn, rg.x0, rg.x1);
-    drag.pl.y = snapTo(drag.y0 + p.y - drag.py, sn, rg.y0, rg.y1);
-    draw();
-  });
-  function endDrag() {
-    if (!drag) return;
-    if (drag.pl.x !== drag.x0 || drag.pl.y !== drag.y0) { moves++; afterMove(); }
-    drag = null;
-  }
-  cv.addEventListener('pointerup', endDrag);
-  cv.addEventListener('pointercancel', endDrag);
-
-  function move(dx, dy) {
-    if (!sel || !sel.on || solved) return; var rg = G.range();
-    var sn = sel.snap || 1, nx = snapTo(sel.x + dx * sn, sn, rg.x0, rg.x1), ny = snapTo(sel.y + dy * sn, sn, rg.y0, rg.y1);
-    if (nx === sel.x && ny === sel.y) return; sel.x = nx; sel.y = ny; moves++; afterMove();
-  }
-  function rotate(d) { if (!sel || !sel.on || solved || (sel.poly && d % 90 !== 0)) return; sel.rot = (sel.rot + d + 360) % 360; moves++; renderChips(); afterMove(); }
-  function scale(d) {
-    if (!sel || !sel.on || solved || sel.poly) return; var n = clamp(sel.s10 + d, 5, 20);
-    if (n === sel.s10) return; sel.s10 = n; moves++; renderChips(); afterMove();
-  }
-  cv.addEventListener('keydown', function (e) {
-    var k = e.key, d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[k];
-    if (d) { e.preventDefault(); move(d[0], d[1]); }
-    else if (k === 'q' || k === 'Q') rotate(e.shiftKey || isPoly() ? -90 : -15);
-    else if (k === 'e' || k === 'E') rotate(e.shiftKey || isPoly() ? 90 : 15);
-    else if (k === '-') scale(-1); else if (k === '+' || k === '=') scale(1);
-  });
-  $('rotL90').onclick = function () { rotate(-90); }; $('rotL15').onclick = function () { rotate(-15); };
-  $('rotR15').onclick = function () { rotate(15); }; $('rotR90').onclick = function () { rotate(90); };
-  $('scDown').onclick = function () { scale(-1); }; $('scUp').onclick = function () { scale(1); };
-  function updateTools() {
-    var dis = !(sel && sel.on) || solved;
-    ['rotL90', 'rotR90'].forEach(function (id) { $(id).disabled = dis; });
-    ['rotL15', 'rotR15', 'scDown', 'scUp'].forEach(function (id) { $(id).disabled = dis || isPoly(); }); // ポリオミノ版は90°回転だけ・拡大縮小なし
-  }
-
-  function placements() {
-    var o = {}; plates.forEach(function (pl) { o[pl.id] = { x: pl.x, y: pl.y, rot: pl.rot, s10: pl.s10, on: pl.on }; }); return o;
-  }
-  function afterMove() {
-    draw(); $('info').textContent = '操作回数:' + moves;
-    if (G.evaluate(flag, mode, placements(), variant()) >= passOf()) win();
-  }
-  function stars() { return moves <= par * 1.5 ? '★★★' : moves <= par * 2.5 ? '★★☆' : '★☆☆'; }
-  function win() {
-    solved = true; sel = null; draw(); renderChips();
-    var sec = Math.round((Date.now() - t0) / 1000);
-    $('msg').textContent = '🎉 正解!「' + flag.name + '」 操作' + moves + '回・' + sec + '秒 ' + stars();
-    $('name').value = localStorage.getItem('fm-name') || '';
-    $('send').disabled = false; $('result').hidden = false;
-    $('next').textContent = tab === 'free' ? '次の国旗へ' : '次の問題へ';
-    if (tab !== 'free') finishQuestion();
-  }
-
-  function label(pl) { return pl.dn; } // 形・角度・倍率は表示しない
-  function renderChips() {
-    var box = $('chips'); box.innerHTML = '';
-    plates.forEach(function (pl) {
-      var b = document.createElement('button'); b.className = 'chip' + (pl === sel ? ' sel' : '');
-      var sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = INKCOL[pl.ink];
-      var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = pl.on; cb.title = '板を使う';
-      cb.onclick = function (e) {
-        e.stopPropagation(); if (solved) { e.preventDefault(); return; }
-        pl.on = cb.checked; moves++; if (!pl.on && sel === pl) sel = null; renderChips(); afterMove();
-      };
-      b.append(sw, document.createTextNode(label(pl) + ' '), cb);
-      b.onclick = function () { if (!solved) { select(pl); draw(); } };
-      box.appendChild(b);
+    $('#modeSeg').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (b) startPuzzle({ mode: b.dataset.mode });
     });
+    $('#levelSeg').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (b) startPuzzle({ level: b.dataset.level });
+    });
+
+    $('#dailyBtn').addEventListener('click', loadDaily);
+    $('#newBtn').addEventListener('click', () => startPuzzle({ daily: null }));
+
+    $('#tray').addEventListener('click', (e) => {
+      const el = e.target.closest('.piece');
+      if (!el || state.cleared) return;
+      const id = el.dataset.id;
+      if (isPlaced(id)) {
+        state.placed = state.placed.filter((p) => p.id !== id);
+        state.selected = id;
+        renderTray();
+        updateBoard();
+      } else {
+        select(id);
+      }
+    });
+
+    const board = $('#board');
+    board.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch') return;
+      const rc = cellOf(e);
+      if (!rc) return;
+      if (state.hover && state.hover[0] === rc[0] && state.hover[1] === rc[1]) return;
+      state.hover = rc;
+      if (state.selected) updateBoard();
+    });
+    board.addEventListener('pointerleave', () => {
+      state.hover = null;
+      if (state.selected) updateBoard();
+    });
+    board.addEventListener('click', (e) => {
+      if (state.cleared || state.assisted) return;
+      const rc = cellOf(e);
+      if (!rc) return;
+      if (state.selected) placeAt(rc[0], rc[1]);
+      else pickUp(rc[0], rc[1]);
+    });
+    board.addEventListener('contextmenu', (e) => {
+      const rc = cellOf(e);
+      if (!rc) return;
+      e.preventDefault();
+      if (!state.cleared && !state.assisted) { state.selected = null; pickUp(rc[0], rc[1]); }
+    });
+
+    $('#rotBtn').addEventListener('click', () => transformSelected(rotate));
+    $('#flipBtn').addEventListener('click', () => transformSelected(flip));
+    $('#undoBtn').addEventListener('click', undo);
+    $('#resetBtn').addEventListener('click', resetCurrent);
+    $('#hintBtn').addEventListener('click', () => {
+      state.hint = !state.hint;
+      $('#hintBtn').classList.toggle('on', state.hint);
+      updateBoard();
+    });
+    $('#solveBtn').addEventListener('click', () => {
+      if (confirm('答えを表示します。この問題はランキングに記録できなくなります。よろしいですか?')) showSolution();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT') return;
+      const k = e.key.toLowerCase();
+      if (k === 'r') transformSelected(rotate);
+      else if (k === 'f') transformSelected(flip);
+      else if (k === 'escape') { state.selected = null; renderTray(); updateBoard(); }
+    });
+
+    $('#submitBtn').addEventListener('click', submitScore);
+    $('#nextBtn').addEventListener('click', () => {
+      $('#clearDialog').close();
+      startPuzzle({ daily: null });
+    });
+    window.addEventListener('resize', fitBoard);
   }
 
-  // ---- ボタン類 ----
-  $('check').onclick = function () {
-    if (solved) return; moves++;
-    var r = G.evaluate(flag, mode, placements(), variant());
-    $('info').textContent = '一致度:' + Math.round(r * 100) + '%  / 操作回数:' + moves;
-  };
-  $('hint').onclick = function () {
-    if (solved) return; moves += 3; showRef(); $('refbox').hidden = false;
-    $('info').textContent = '操作回数:' + moves;
-    clearTimeout(hintTimer); hintTimer = setTimeout(function () { $('refbox').hidden = true; }, 3000);
-  };
-  $('reset').onclick = function () { tab !== 'free' ? playQ() : start(flag.id); };
-  $('rand').onclick = randomFlag; $('next').onclick = nextAction;
-  $('flagSel').onchange = function () { start(this.value); };
-  $('allFlags').onchange = function () { fillSelect(); randomFlag(); };
-  $('back').onclick = renderStages; $('unlockAll').onchange = renderStages;
-  function setTab(t) {
-    tab = t; ['stage', 'free', 'poly'].forEach(function (k) { $('t-' + k).className = t === k ? 'on' : ''; });
-    if (t !== 'free') renderStages(); else { fillSelect(); showView(true); randomFlag(); }
-  }
-  $('t-stage').onclick = function () { setTab('stage'); }; $('t-free').onclick = function () { setTab('free'); }; $('t-poly').onclick = function () { setTab('poly'); };
-  function setMode(m) {
-    mode = m; $('m-add').className = m === 'add' ? 'on' : ''; $('m-sub').className = m === 'sub' ? 'on' : '';
-    tab !== 'free' ? renderStages() : start(flag.id);
-  }
-  $('m-add').onclick = function () { setMode('add'); };
-  $('m-sub').onclick = function () { setMode('sub'); };
-
-  // ---- サーバー連携 ----
-  $('send').onclick = function () {
-    var name = $('name').value.trim() || '名無し'; localStorage.setItem('fm-name', name);
-    $('send').disabled = true;
-    fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ flag: flag.id, mode: mode, variant: variant(), name: name, moves: moves, ms: Date.now() - t0, placements: placements() }) })
-      .then(function (r) { return r.json(); })
-      .then(function (j) { $('msg').textContent += j.ok ? '(記録しました)' : '(記録に失敗:' + j.error + ')'; loadRank(); })
-      .catch(function () { $('msg').textContent += '(通信エラー)'; $('send').disabled = false; });
-  };
-  function loadRank() {
-    fetch('/api/ranking?flag=' + flag.id + '&mode=' + mode + '&variant=' + variant()).then(function (r) { return r.json(); }).then(function (list) {
-      var ol = $('rank'); ol.innerHTML = '';
-      if (!list.length) { ol.innerHTML = '<li>まだ記録がありません</li>'; return; }
-      list.forEach(function (e) {
-        var li = document.createElement('li');
-        li.textContent = e.name + ' — ' + e.moves + '回 / ' + Math.round(e.ms / 1000) + '秒'; ol.appendChild(li);
-      });
-    }).catch(function () { $('rank').innerHTML = '<li>ランキングを取得できません</li>'; });
-  }
-
-  fillSelect();
-  flag = G.FLAGS[0]; renderStages();
+  // ---------- 起動 ----------
+  renderFlagList();
+  bindEvents();
+  startPuzzle({ flagId: 'fr', mode: 'light', level: 'normal' });
 })();
