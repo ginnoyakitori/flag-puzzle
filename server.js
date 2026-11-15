@@ -23,7 +23,7 @@ app.get('/api/ranking', (req, res) => {
 
 app.post('/api/score', (req, res) => {
   const b = req.body || {};
-  const flag = Core.FLAGS.find(f => f.id === b.flag);
+  const flag = Core.flagById(b.flag);
   if (!flag || !Core.INKS[b.mode]) return res.status(400).json({ error: 'invalid level' });
   const plates = Core.buildPlates(flag, b.mode);
   const placements = {}, rg = Core.range();

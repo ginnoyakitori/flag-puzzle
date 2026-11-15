@@ -1,8 +1,9 @@
 // サーバーとブラウザで共有するゲームロジック(旗データ・板の生成・判定)
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.GameCore = factory();
-})(typeof window !== 'undefined' ? window : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(root);
+  else root.GameCore = factory(root);
+})(typeof window !== 'undefined' ? window : this, function (root) {
+  var DATA = (typeof module === 'object' && module.exports) ? require('./flags-data.js') : root.FlagData;
   var W = 30, H = 18, PASS = 0.995;
   var WS = { w: 46, h: 30, ox: 8, oy: 6 }; // 作業台の大きさと旗の枠の位置
   var COLORS = { W: [255,255,255], K: [0,0,0], R: [255,0,0], G: [0,255,0], B: [0,0,255], Y: [255,255,0] };
@@ -18,33 +19,39 @@
     for (i = 0; i < 10; i++) { a = -Math.PI / 2 + i * Math.PI / 5; rr = i % 2 ? R * 0.382 : R; pts.push([cx + rr * Math.cos(a), cy + rr * Math.sin(a)]); }
     return poly(pts, [cx, cy]);
   }
-  function reg(color) { return { color: color, prims: Array.prototype.slice.call(arguments, 1) }; }
-  function vert(a, b, d) { return [reg(a, r(0,0,10,18)), reg(b, r(10,0,10,18)), reg(d, r(20,0,10,18))]; }
-  function hor3(a, b, d) { return [reg(a, r(0,0,30,6)), reg(b, r(0,6,30,6)), reg(d, r(0,12,30,6))]; }
-  function hor2(a, b) { return [reg(a, r(0,0,30,9)), reg(b, r(0,9,30,9))]; }
-
-  var FLAGS = [
-    { id: 'jp', name: '日本', regions: [reg('W', r(0,0,30,18)), reg('R', c(15,9,5))] },
-    { id: 'de', name: 'ドイツ', regions: hor3('K','R','Y') },
-    { id: 'it', name: 'イタリア', regions: vert('G','W','R') },
-    { id: 'fr', name: 'フランス', regions: vert('B','W','R') },
-    { id: 'be', name: 'ベルギー', regions: vert('K','Y','R') },
-    { id: 'ng', name: 'ナイジェリア', regions: vert('G','W','G') },
-    { id: 'nl', name: 'オランダ', regions: hor3('R','W','B') },
-    { id: 'at', name: 'オーストリア', regions: hor3('R','W','R') },
-    { id: 'hu', name: 'ハンガリー', regions: hor3('R','W','G') },
-    { id: 'ru', name: 'ロシア', regions: hor3('W','B','R') },
-    { id: 'ua', name: 'ウクライナ', regions: hor2('B','Y') },
-    { id: 'pl', name: 'ポーランド', regions: hor2('W','R') },
-    { id: 'id', name: 'インドネシア', regions: hor2('R','W') },
-    { id: 'se', name: 'スウェーデン', regions: [reg('B', r(0,0,30,18)), reg('Y', r(9,0,3,18), r(0,7,30,3))] },
-    { id: 'fi', name: 'フィンランド', regions: [reg('W', r(0,0,30,18)), reg('B', r(7,0,4,18), r(0,7,30,4))] },
-    { id: 'dk', name: 'デンマーク', regions: [reg('R', r(0,0,30,18)), reg('W', r(9,0,3,18), r(0,7,30,3))] },
-    { id: 'ch', name: 'スイス', regions: [reg('R', r(0,0,30,18)), reg('W', r(13,3,4,12), r(8,7,14,4))] },
-    { id: 'bd', name: 'バングラデシュ', regions: [reg('G', r(0,0,30,18)), reg('R', c(13,9,5))] },
-    { id: 'cz', name: 'チェコ', regions: [reg('W', r(0,0,30,9)), reg('R', r(0,9,30,9)), reg('B', poly([[0,0],[15,9],[0,18]], null))] },
-    { id: 'vn', name: 'ベトナム', regions: [reg('R', r(0,0,30,18)), reg('Y', star(15,9,6))] }
-  ];
+  function reg(color, prims) { return { color: color, prims: prims }; }
+  var rd = function (v) { return Math.round(v * 1e6) / 1e6; };
+  // スペック文字列 → 領域リスト(後の領域ほど上に重なる)
+  function parseSpec(spec) {
+    var out = [];
+    spec.split(';').forEach(function (tk) {
+      tk = tk.trim(); if (!tk) return;
+      var i = tk.indexOf(':'), k = tk.slice(0, i), a = tk.slice(i + 1), n, cs, wt, tot, cum, j;
+      if (k === 'H' || k === 'V') {
+        var parts = a.split('@'); cs = parts[0].split('');
+        wt = parts[1] ? parts[1].split(',').map(Number) : cs.map(function () { return 1; });
+        tot = wt.reduce(function (x, y) { return x + y; }, 0); cum = 0;
+        cs.forEach(function (col, idx) {
+          var a0 = rd(cum / tot), a1 = rd((cum + wt[idx]) / tot); cum += wt[idx];
+          out.push(reg(col, [k === 'H' ? r(0, rd(a0 * H), W, rd((a1 - a0) * H)) : r(rd(a0 * W), 0, rd((a1 - a0) * W), H)]));
+        });
+        return;
+      }
+      var args = a.split(','), col = args[0]; n = args.slice(1).map(Number);
+      if (k === 'bg') out.push(reg(col, [r(0, 0, W, H)]));
+      else if (k === 'r') out.push(reg(col, [r(n[0], n[1], n[2], n[3])]));
+      else if (k === 'c') out.push(reg(col, [c(n[0], n[1], n[2])]));
+      else if (k === 's') out.push(reg(col, [star(n[0], n[1], n[2])]));
+      else if (k === 'p') { var pts = []; for (j = 0; j + 1 < n.length; j += 2) pts.push([n[j], n[j + 1]]); out.push(reg(col, [poly(pts, null)])); }
+      else if (k === '+') out.push(reg(col, [r(n[0], 0, n[1], H), r(0, n[2], W, n[3])]));
+      else if (k === 'k') out.push(reg(col, [r(n[0] - n[2] / 2, n[1] - n[3] / 2, n[2], n[3]), r(n[0] - n[3] / 2, n[1] - n[2] / 2, n[3], n[2])]));
+      else if (k === 'x') out.push(reg(col, [poly([[0,0],[n[0],0],[W,H],[W - n[0],H]], null), poly([[W - n[0],0],[W,0],[n[0],H],[0,H]], null)]));
+    });
+    return out;
+  }
+  // q: 0=忠実(ステージ出題用) / 1=色を近似 / 2=細部を省略 / 3=両方
+  var FLAGS_ALL = DATA.map(function (d) { return { id: d[0], name: d[1], q: d[2], regions: parseSpec(d[3]) }; });
+  function flagById(id) { return FLAGS_ALL.filter(function (f) { return f.id === id; })[0]; }
 
   function inPoly(pts, x, y) {
     var inside = false, i, j;
@@ -94,15 +101,16 @@
     return s;
   }
   function grid(fn) { var i, j; for (i = 0; i < W * 2; i++) for (j = 0; j < H * 2; j++) fn((i + 0.5) / 2, (j + 0.5) / 2); }
+  function near(a, b) { return Math.abs(a - b) < 1e-6; }
   function mergeRects(L) {
     var again = true;
     while (again) {
       again = false;
       outer: for (var i = 0; i < L.length; i++) for (var j = i + 1; j < L.length; j++) {
         var a = L[i], b = L[j], m = null;
-        if (a.y === b.y && a.h === b.h && (a.x + a.w === b.x || b.x + b.w === a.x))
+        if (near(a.y, b.y) && near(a.h, b.h) && (near(a.x + a.w, b.x) || near(b.x + b.w, a.x)))
           m = { t: 'r', x: Math.min(a.x, b.x), y: a.y, w: a.w + b.w, h: a.h };
-        else if (a.x === b.x && a.w === b.w && (a.y + a.h === b.y || b.y + b.h === a.y))
+        else if (near(a.x, b.x) && near(a.w, b.w) && (near(a.y + a.h, b.y) || near(b.y + b.h, a.y)))
           m = { t: 'r', x: a.x, y: Math.min(a.y, b.y), w: a.w, h: a.h + b.h };
         if (m) { L.splice(j, 1); L[i] = m; again = true; break outer; }
       }
@@ -115,7 +123,7 @@
     var xs = p.pts.map(function (q) { return q[0]; }), ys = p.pts.map(function (q) { return q[1]; });
     return [Math.min.apply(null, xs), Math.min.apply(null, ys), Math.max.apply(null, xs), Math.max.apply(null, ys)];
   }
-  function inBox(a, b) { return b[0] >= a[0] && b[1] >= a[1] && b[2] <= a[2] && b[3] <= a[3]; }
+  function inBox(a, b) { var e = 1e-6; return b[0] >= a[0] - e && b[1] >= a[1] - e && b[2] <= a[2] + e && b[3] <= a[3] + e; }
   function shift(p, dx, dy) {
     if (p.t === 'r') return { t: 'r', x: p.x - dx, y: p.y - dy, w: p.w, h: p.h };
     if (p.t === 'c') return { t: 'c', cx: p.cx - dx, cy: p.cy - dy, r: p.r };
@@ -194,7 +202,22 @@
     });
     return (sets[key] = out);
   }
-  function available() { return FLAGS; }
+  function available(all) { return all ? FLAGS_ALL : FLAGS; }
+  // 難しさ=板の枚数+穴あき×1.5+多角形×1。ステージ=難しい順に5問ずつ(端数は前のステージへ)
+  function difficulty(flag, mode) {
+    var pl = buildPlates(flag, mode);
+    return pl.length + 1.5 * pl.filter(function (p) { return p.hole; }).length + pl.filter(function (p) { return p.kind === 'p'; }).length;
+  }
+  var stageCache = {};
+  function stages(mode, size) {
+    size = size || 5; var key = mode + size; if (stageCache[key]) return stageCache[key];
+    var list = FLAGS.map(function (f) { return { id: f.id, d: difficulty(f, mode) }; })
+      .sort(function (a, b) { return a.d - b.d || (a.id < b.id ? -1 : 1); });
+    var out = [], i;
+    for (i = 0; i < list.length; i += size) out.push(list.slice(i, i + size).map(function (x) { return x.id; }));
+    if (out.length > 1 && out[out.length - 1].length < 3) out[out.length - 2] = out[out.length - 2].concat(out.pop());
+    return (stageCache[key] = out);
+  }
   function range() { return { x0: -WS.ox, x1: WS.w - WS.ox, y0: -WS.oy, y1: WS.h - WS.oy }; }
 
   // ---- 判定 ----
@@ -218,6 +241,10 @@
     });
     return ok / tot;
   }
-  return { W: W, H: H, PASS: PASS, WS: WS, FLAGS: FLAGS, INKS: INKS, COLORS: COLORS,
+  // ステージ出題用の旗:形も色も忠実(q=0)で、板が10枚以下に収まるもの
+  var FLAGS = FLAGS_ALL.filter(function (f) {
+    return f.q === 0 && ['add', 'sub'].every(function (m) { return buildPlates(f, m).length <= 10; });
+  });
+  return { W: W, H: H, PASS: PASS, WS: WS, FLAGS: FLAGS, FLAGS_ALL: FLAGS_ALL, flagById: flagById, stages: stages, difficulty: difficulty, INKS: INKS, COLORS: COLORS,
            buildPlates: buildPlates, available: available, evaluate: evaluate, colorAt: colorAt, mix: mix, range: range };
 });

@@ -14,8 +14,23 @@
     <button id="m-sub">減法混色(フィルター C M Y)</button>
   </div>
   <div class="row">
+    <button id="t-stage" class="on">ステージ</button>
+    <button id="t-free">フリー出題</button>
+  </div>
+  <section id="stageView">
+    <h2 id="stageHead">ステージ選択</h2>
+    <div id="stageGrid" class="grid"></div>
+    <p class="note" id="stageNote"></p>
+    <label class="note"><input type="checkbox" id="unlockAll"> 全ステージを開放する</label>
+  </section>
+  <section id="playView" hidden>
+  <div class="row" id="freeBar">
     <select id="flagSel"></select>
     <button id="rand">おまかせ出題</button>
+    <label class="note"><input type="checkbox" id="allFlags"> 簡略版も含む197か国</label>
+  </div>
+  <div class="row" id="stageBar">
+    <button id="back">← ステージ選択</button><span id="stageInfo"></span>
   </div>
   <div id="q" class="q"></div>
   <canvas id="cv" tabindex="0"></canvas>
@@ -45,7 +60,9 @@
     <h2>ランキング(操作回数が少ない順)</h2>
     <ol id="rank"></ol>
   </section>
+  </section>
 </main>
+<script src="flags-data.js"></script>
 <script src="game-core.js"></script>
 <script src="client.js"></script>
 </body>

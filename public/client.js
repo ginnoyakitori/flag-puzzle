@@ -7,24 +7,27 @@
   var off = document.createElement('canvas'); off.width = cv.width; off.height = cv.height;
   var octx = off.getContext('2d');
 
-  var mode = 'add', flag, plates = [], sel = null, moves = 0, par = 1, t0 = 0, solved = false, drag = null, hintTimer = null;
+  var mode = 'add', tab = 'stage', stageNo = 0, qIdx = 0, stageList = [], qStars = [], flag, plates = [], sel = null, moves = 0, par = 1, t0 = 0, solved = false, drag = null, hintTimer = null;
 
   function ri(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
   // ---- 出題 ----
+  function pool() { return G.available($('allFlags').checked); }
   function fillSelect() {
     var sl = $('flagSel'); sl.innerHTML = '';
-    G.available(mode).forEach(function (f) {
-      var o = document.createElement('option'); o.value = f.id; o.textContent = f.name; sl.appendChild(o);
+    pool().forEach(function (f) {
+      var o = document.createElement('option'); o.value = f.id; o.textContent = f.name + (f.q ? '(簡略)' : ''); sl.appendChild(o);
     });
   }
-  function start(id) {
-    flag = G.FLAGS.filter(function (f) { return f.id === id; })[0]; $('flagSel').value = id;
+  // opts: 最初に板をずらす内容(ステージ1は位置だけ、2以降で回転、3以降で拡大縮小)
+  function start(id, opts) {
+    opts = opts || { rot: true, scale: true };
+    flag = G.flagById(id); if ([].some.call($('flagSel').options, function (o) { return o.value === id; })) $('flagSel').value = id;
     var rg = G.range(); par = 0;
     plates = G.buildPlates(flag, mode).map(function (sp) {
-      var x, y, k = Math.random() < 0.6 ? ri(1, 3) : 0, s10 = Math.random() < 0.6 ? ri(6, 14) : 10;
-      if (s10 === 10 && k === 0) k = 1;
+      var x, y, k = opts.rot && Math.random() < 0.6 ? ri(1, 3) : 0, s10 = opts.scale && Math.random() < 0.6 ? ri(6, 14) : 10;
+      if (opts.rot && opts.scale && s10 === 10 && k === 0) k = 1;
       do { x = ri(rg.x0 + 2, rg.x1 - 2); y = ri(rg.y0 + 2, rg.y1 - 2); } while (Math.abs(x - sp.x) + Math.abs(y - sp.y) < 4);
       par += 1 + Math.min(k, 4 - k) + Math.abs(s10 - 10);
       return { id: sp.id, ink: sp.ink, ops: sp.ops, bb: sp.bb, hole: sp.hole, kind: sp.kind, x: x, y: y, rot: k * 90, s10: s10, on: true };
@@ -35,9 +38,47 @@
     renderChips(); draw(); loadRank();
   }
   function randomFlag() {
-    var list = G.available(mode), n;
+    var list = pool(), n;
     do { n = list[ri(0, list.length - 1)]; } while (list.length > 1 && n === flag);
     start(n.id);
+  }
+
+  // ---- ステージ ----
+  function loadProg() { try { return JSON.parse(localStorage.getItem('fm-progress') || '{}'); } catch (e) { return {}; } }
+  function saveProg(p) { try { localStorage.setItem('fm-progress', JSON.stringify(p)); } catch (e) { /* 保存できなくても遊べる */ } }
+  function showView(play) { $('stageView').hidden = play; $('playView').hidden = !play; $('freeBar').hidden = tab !== 'free'; $('stageBar').hidden = tab !== 'stage'; }
+  function renderStages() {
+    showView(false);
+    var prog = loadProg()[mode] || {}, all = $('unlockAll').checked, grid = $('stageGrid'); grid.innerHTML = '';
+    stageList = G.stages(mode);
+    $('stageHead').textContent = (mode === 'add' ? '加法混色' : '減法混色') + 'のステージ(全' + stageList.length + ')';
+    stageList.forEach(function (_, i) {
+      var n = i + 1, b = document.createElement('button'), st = prog[n] ? prog[n].stars : 0;
+      b.className = 'stg'; b.disabled = !(all || n === 1 || prog[n - 1]);
+      b.innerHTML = (b.disabled ? '🔒 ' : '') + n + '<small>' + (st ? '★★★'.slice(0, st) + '☆☆☆'.slice(0, 3 - st) : '未クリア') + '</small>';
+      b.onclick = function () { startStage(n); };
+      grid.appendChild(b);
+    });
+    $('stageNote').textContent = 'ステージ1は位置合わせだけ、2から板の向きがずれ、3から大きさもずれます。5問クリアで次のステージが開きます。';
+  }
+  function startStage(n) { stageNo = n; qIdx = 0; qStars = []; playQ(); }
+  function playQ() {
+    showView(true);
+    $('stageInfo').textContent = 'ステージ' + stageNo + '  第' + (qIdx + 1) + '問 / ' + stageList[stageNo - 1].length;
+    start(stageList[stageNo - 1][qIdx], { rot: stageNo >= 2, scale: stageNo >= 3 });
+  }
+  function finishQuestion() {
+    var last = qIdx === stageList[stageNo - 1].length - 1, st = (stars().match(/★/g) || []).length;
+    qStars[qIdx] = st; $('next').textContent = last ? 'ステージ選択へ' : '次の問題へ';
+    if (!last) return;
+    var avg = Math.max(1, Math.round(qStars.reduce(function (a, b) { return a + b; }, 0) / qStars.length));
+    var p = loadProg(); p[mode] = p[mode] || {};
+    if (!p[mode][stageNo] || p[mode][stageNo].stars < avg) p[mode][stageNo] = { stars: avg };
+    saveProg(p); $('msg').textContent += '  🏆 ステージ' + stageNo + ' クリア!(' + '★★★'.slice(0, avg) + ')';
+  }
+  function nextAction() {
+    if (tab === 'free') return randomFlag();
+    if (qIdx < stageList[stageNo - 1].length - 1) { qIdx++; playQ(); } else renderStages();
   }
 
   // ---- 描画(単色の板を lighter=加法 / multiply=減法 で重ねる) ----
@@ -163,6 +204,8 @@
     $('msg').textContent = '🎉 正解!「' + flag.name + '」 操作' + moves + '回・' + sec + '秒 ' + stars();
     $('name').value = localStorage.getItem('fm-name') || '';
     $('send').disabled = false; $('result').hidden = false;
+    $('next').textContent = tab === 'free' ? '次の国旗へ' : '次の問題へ';
+    if (tab === 'stage') finishQuestion();
   }
 
   function label(pl) {
@@ -197,12 +240,19 @@
     $('info').textContent = '操作回数:' + moves;
     clearTimeout(hintTimer); hintTimer = setTimeout(function () { $('refbox').hidden = true; }, 3000);
   };
-  $('reset').onclick = function () { start(flag.id); };
-  $('rand').onclick = randomFlag; $('next').onclick = randomFlag;
+  $('reset').onclick = function () { tab === 'stage' ? playQ() : start(flag.id); };
+  $('rand').onclick = randomFlag; $('next').onclick = nextAction;
   $('flagSel').onchange = function () { start(this.value); };
+  $('allFlags').onchange = function () { fillSelect(); randomFlag(); };
+  $('back').onclick = renderStages; $('unlockAll').onchange = renderStages;
+  function setTab(t) {
+    tab = t; $('t-stage').className = t === 'stage' ? 'on' : ''; $('t-free').className = t === 'free' ? 'on' : '';
+    if (t === 'stage') renderStages(); else { fillSelect(); showView(true); randomFlag(); }
+  }
+  $('t-stage').onclick = function () { setTab('stage'); }; $('t-free').onclick = function () { setTab('free'); };
   function setMode(m) {
     mode = m; $('m-add').className = m === 'add' ? 'on' : ''; $('m-sub').className = m === 'sub' ? 'on' : '';
-    start(flag.id);
+    tab === 'stage' ? renderStages() : start(flag.id);
   }
   $('m-add').onclick = function () { setMode('add'); };
   $('m-sub').onclick = function () { setMode('sub'); };
@@ -229,5 +279,5 @@
   }
 
   fillSelect();
-  start(G.FLAGS[ri(0, G.FLAGS.length - 1)].id);
+  flag = G.FLAGS[0]; renderStages();
 })();
