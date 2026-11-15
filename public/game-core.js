@@ -14,10 +14,21 @@
   function r(x, y, w, h) { return { t: 'r', x: x, y: y, w: w, h: h }; }
   function c(cx, cy, rad) { return { t: 'c', cx: cx, cy: cy, r: rad, pv: [cx, cy] }; }
   function poly(pts, pv) { return { t: 'p', pts: pts, pv: pv }; }
-  function star(cx, cy, R) {
+  // 星:rot=回転(度)、n=頂点数、inner=内側の半径比
+  function star(cx, cy, R, rot, n, inner) {
+    n = n || 5; inner = inner || (n === 5 ? 0.382 : 0.5); rot = (rot || 0) * Math.PI / 180;
     var pts = [], i, a, rr;
-    for (i = 0; i < 10; i++) { a = -Math.PI / 2 + i * Math.PI / 5; rr = i % 2 ? R * 0.382 : R; pts.push([cx + rr * Math.cos(a), cy + rr * Math.sin(a)]); }
+    for (i = 0; i < 2 * n; i++) { a = -Math.PI / 2 + rot + i * Math.PI / n; rr = i % 2 ? R * inner : R; pts.push([cx + rr * Math.cos(a), cy + rr * Math.sin(a)]); }
     return poly(pts, [cx, cy]);
+  }
+  // 三日月:外円(中心cx,cy・半径R)から、右にdずれた内円(半径rr)を引いた形。angだけ時計回りに回す(0=右向きに開く)
+  function crescent(cx, cy, R, rr, d, ang) {
+    var flip = d < 0; d = Math.abs(d); if (flip) ang += 180;
+    var a = (R * R - rr * rr + d * d) / (2 * d), h = Math.sqrt(Math.max(0, R * R - a * a));
+    var t0 = Math.atan2(h, a), p0 = Math.atan2(h, a - d), N = 24, pts = [], i, t, u, q = ang * Math.PI / 180;
+    for (i = 0; i <= N; i++) { t = t0 + (2 * Math.PI - 2 * t0) * i / N; pts.push([R * Math.cos(t), R * Math.sin(t)]); }
+    for (i = 0; i <= N; i++) { u = (2 * Math.PI - p0) + (2 * p0 - 2 * Math.PI) * i / N; pts.push([d + rr * Math.cos(u), rr * Math.sin(u)]); }
+    return poly(pts.map(function (v) { return [cx + v[0] * Math.cos(q) - v[1] * Math.sin(q), cy + v[0] * Math.sin(q) + v[1] * Math.cos(q)]; }), [cx, cy]);
   }
   function reg(color, prims) { return { color: color, prims: prims }; }
   var rd = function (v) { return Math.round(v * 1e6) / 1e6; };
@@ -37,11 +48,25 @@
         });
         return;
       }
+      if (k === 'J') { // ユニオンジャック(x0,y0,w,h の範囲に収める。縞の太さは目安)
+        n = a.split(',').map(Number); var x0 = n[0], y0 = n[1], w = n[2], h = n[3], tw = w * 0.17, tr = w * 0.08;
+        var diag = function (t) { return [poly([[x0,y0],[x0 + t,y0],[x0 + w,y0 + h],[x0 + w - t,y0 + h]], null), poly([[x0 + w - t,y0],[x0 + w,y0],[x0 + t,y0 + h],[x0,y0 + h]], null)]; };
+        out.push(reg('W', diag(tw)), reg('R', diag(tr)),
+          reg('W', [r(x0 + w * 0.4, y0, w * 0.2, h), r(x0, y0 + h * 0.33, w, h * 0.34)]),
+          reg('R', [r(x0 + w * 0.45, y0, w * 0.1, h), r(x0, y0 + h * 0.42, w, h * 0.16)]));
+        return;
+      }
       var args = a.split(','), col = args[0]; n = args.slice(1).map(Number);
       if (k === 'bg') out.push(reg(col, [r(0, 0, W, H)]));
       else if (k === 'r') out.push(reg(col, [r(n[0], n[1], n[2], n[3])]));
       else if (k === 'c') out.push(reg(col, [c(n[0], n[1], n[2])]));
-      else if (k === 's') out.push(reg(col, [star(n[0], n[1], n[2])]));
+      else if (k === 's') out.push(reg(col, [star(n[0], n[1], n[2], n[3], n[4], n[5])]));
+      else if (k === 'm') out.push(reg(col, [crescent(n[0], n[1], n[2], n[3], n[4], n[5] || 0)]));
+      else if (k === 'o') { // 星の輪(または弧): cx,cy,輪の半径,星の半径,個数,開始角,終了角(0=右,90=下)
+        var st = [], full = n[6] - n[5] >= 360, i2;
+        for (i2 = 0; i2 < n[4]; i2++) { var ang = (n[5] + (n[6] - n[5]) * i2 / (full ? n[4] : n[4] - 1)) * Math.PI / 180; st.push(star(n[0] + n[2] * Math.cos(ang), n[1] + n[2] * Math.sin(ang), n[3])); }
+        out.push(reg(col, st));
+      }
       else if (k === 'p') { var pts = []; for (j = 0; j + 1 < n.length; j += 2) pts.push([n[j], n[j + 1]]); out.push(reg(col, [poly(pts, null)])); }
       else if (k === '+') out.push(reg(col, [r(n[0], 0, n[1], H), r(0, n[2], W, n[3])]));
       else if (k === 'k') out.push(reg(col, [r(n[0] - n[2] / 2, n[1] - n[3] / 2, n[2], n[3]), r(n[0] - n[3] / 2, n[1] - n[2] / 2, n[3], n[2])]));
@@ -49,7 +74,7 @@
     });
     return out;
   }
-  // q: 0=忠実(ステージ出題用) / 1=色を近似 / 2=細部を省略 / 3=両方
+  // q: 0=忠実 / 4=紋章を円・星・多角形で近似(0と4がステージ出題の対象) / 1=色を近似 / 2=細部を省略 / 3=両方
   var FLAGS_ALL = DATA.map(function (d) { return { id: d[0], name: d[1], q: d[2], regions: parseSpec(d[3]) }; });
   function flagById(id) { return FLAGS_ALL.filter(function (f) { return f.id === id; })[0]; }
 
@@ -241,9 +266,9 @@
     });
     return ok / tot;
   }
-  // ステージ出題用の旗:形も色も忠実(q=0)で、板が10枚以下に収まるもの
+  // ステージ出題用の旗:q=0または4で、板が両モードとも10枚以下に収まるもの
   var FLAGS = FLAGS_ALL.filter(function (f) {
-    return f.q === 0 && ['add', 'sub'].every(function (m) { return buildPlates(f, m).length <= 10; });
+    return (f.q === 0 || f.q === 4) && ['add', 'sub'].every(function (m) { return buildPlates(f, m).length <= 10; });
   });
   return { W: W, H: H, PASS: PASS, WS: WS, FLAGS: FLAGS, FLAGS_ALL: FLAGS_ALL, flagById: flagById, stages: stages, difficulty: difficulty, INKS: INKS, COLORS: COLORS,
            buildPlates: buildPlates, available: available, evaluate: evaluate, colorAt: colorAt, mix: mix, range: range };
